@@ -546,6 +546,21 @@ bool c64_run_frame(void)
 
     C64 *c64 = TheC64;
 
+    // Poll input BEFORE frame emulation so games see current joystick state
+    c64->TheCIA1->Joystick1 = 0xff;
+    c64->TheCIA1->Joystick2 = 0xff;
+    c64->TheDisplay->PollKeyboard(c64->TheCIA1->KeyMatrix, c64->TheCIA1->RevMatrix, &c64->joykey);
+
+    // Apply joystick to selected port only (F9 swaps ports)
+    // Port 1 = Joystick1 ($DC01), Port 2 = Joystick2 ($DC00)
+    extern int input_get_joy_port(void);
+    int port = input_get_joy_port();
+    if (port == 1) {
+        c64->TheCIA1->Joystick1 &= c64->joykey;
+    } else {
+        c64->TheCIA1->Joystick2 &= c64->joykey;
+    }
+
     // Run one frame's worth of emulation (line-based)
     bool frame_complete = false;
     int line_count = 0;
@@ -605,22 +620,6 @@ bool c64_run_frame(void)
                c64->TheCPU->GetPC(),
                ThePrefs.Emul1541Proc ? "ON" : "OFF",
                c64->TheCPU1541->Idle);
-    }
-
-    // Poll input
-    c64->TheCIA1->Joystick1 = 0xff;
-    c64->TheCIA1->Joystick2 = 0xff;
-    c64->TheDisplay->PollKeyboard(c64->TheCIA1->KeyMatrix, c64->TheCIA1->RevMatrix, &c64->joykey);
-
-    // Apply joystick to selected port only (F9 swaps ports)
-    // Port 1 = Joystick1, Port 2 = Joystick2
-    // Note: joykey is 0xFF when idle, only bits 0-4 are used for directions/fire
-    extern int input_get_joy_port(void);
-    int port = input_get_joy_port();
-    if (port == 1) {
-        c64->TheCIA1->Joystick1 &= c64->joykey;
-    } else {
-        c64->TheCIA1->Joystick2 &= c64->joykey;
     }
 
     // Update display

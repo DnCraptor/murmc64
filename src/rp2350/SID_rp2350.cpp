@@ -747,20 +747,6 @@ int16_t DigitalRenderer::calc_single_sample()
 void DigitalRenderer::calc_samples(int count)
 {
     // Debug: track sample generation rate
-    static uint32_t total_samples = 0;
-    static uint32_t report_counter = 0;
-
-    total_samples += count;
-    report_counter++;
-
-    // Report every 10000 calls (should be ~0.64 sec for PAL)
-    if (report_counter >= 10000) {
-        printf("SID: %lu samples in 10000 lines, buf=%d\n",
-               (unsigned long)total_samples, sid_get_buffer_fill());
-        total_samples = 0;
-        report_counter = 0;
-    }
-
     calc_filter();
 
     for (int i = 0; i < count; ++i) {

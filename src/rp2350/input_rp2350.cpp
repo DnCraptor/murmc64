@@ -821,13 +821,6 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
 
         // R-Ctrl (0x10) or R-Alt (0x40) for fire button
         if (mods & 0x50) joy &= ~0x10;  // R-Ctrl=0x10, R-Alt=0x40
-
-        // Debug - show when joystick state changes
-        static uint8_t last_joy = 0xFF;
-        if (joy != last_joy) {
-            printf("JOY: 0x%02X (arrows=0x%02X mods=0x%02X)\n", joy, arrows, mods);
-            last_joy = joy;
-        }
     }
 #endif
 
