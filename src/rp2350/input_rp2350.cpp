@@ -324,9 +324,17 @@ static struct {
     uint8_t key_matrix[8];
     uint8_t rev_matrix[8];
 
-    // Joystick state
+    // Joystick state (from gamepad)
     uint8_t joystick1;
     uint8_t joystick2;
+
+    // Keyboard joystick emulation state
+    // Arrow keys and R-Ctrl/R-Alt for joystick
+    bool joy_up;
+    bool joy_down;
+    bool joy_left;
+    bool joy_right;
+    bool joy_fire;  // R-Ctrl or R-Alt
 
     // PS/2 state
     bool ps2_extended;
@@ -656,6 +664,23 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     if (pad & 0x02) joy &= ~0x04;  // Left
     if (pad & 0x01) joy &= ~0x08;  // Right
     if (pad & 0xC0) joy &= ~0x10;  // A or B -> Fire
+
+    // Keyboard joystick emulation: arrow keys + R-Ctrl/R-Alt for fire
+    // Only when disk UI is not visible
+#if ENABLE_PS2_KEYBOARD
+    if (!disk_ui_is_visible()) {
+        // Arrow keys: ps2kbd_get_arrow_state() returns bits: 0=right, 1=left, 2=down, 3=up
+        uint8_t arrows = ps2kbd_get_arrow_state();
+        if (arrows & 0x08) joy &= ~0x01;  // Up (bit 3)
+        if (arrows & 0x04) joy &= ~0x02;  // Down (bit 2)
+        if (arrows & 0x02) joy &= ~0x04;  // Left (bit 1)
+        if (arrows & 0x01) joy &= ~0x08;  // Right (bit 0)
+
+        // R-Ctrl (0x10) or R-Alt (0x40) for fire button
+        uint8_t mods = ps2kbd_get_modifiers();
+        if (mods & 0x50) joy &= ~0x10;  // R-Ctrl=0x10, R-Alt=0x40
+    }
+#endif
 
     input_state.joystick1 = joy;
 
