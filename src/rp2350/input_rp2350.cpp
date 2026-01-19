@@ -627,8 +627,8 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         input_state.rev_matrix[7] |= 0x02;
     }
 
-    // Handle Ctrl key (L-Ctrl)
-    if (mods & 0x11) {  // L/R Ctrl (but R-Ctrl used for joystick fire)
+    // Handle Ctrl key (L-Ctrl only - R-Ctrl is used for joystick fire)
+    if (mods & 0x01) {  // L-Ctrl only
         input_state.key_matrix[7] &= ~0x04;  // CTRL
         input_state.rev_matrix[2] &= ~0x80;
     } else {
@@ -636,8 +636,8 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         input_state.rev_matrix[2] |= 0x80;
     }
 
-    // Handle C= key (Alt keys, but R-Alt used for joystick fire)
-    if (mods & 0x44) {  // L/R Alt
+    // Handle C= key (L-Alt only - R-Alt is used for joystick fire)
+    if (mods & 0x04) {  // L-Alt only
         input_state.key_matrix[7] &= ~0x20;  // C=
         input_state.rev_matrix[5] &= ~0x80;
     } else {
@@ -759,8 +759,8 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         input_state.rev_matrix[7] |= 0x02;
     }
 
-    // Handle Ctrl key (L-Ctrl)
-    if (usb_mods & 0x11) {  // L/R Ctrl
+    // Handle Ctrl key (L-Ctrl only - R-Ctrl is used for joystick fire)
+    if (usb_mods & 0x01) {  // L-Ctrl only
         input_state.key_matrix[7] &= ~0x04;  // CTRL
         input_state.rev_matrix[2] &= ~0x80;
     } else {
@@ -768,8 +768,8 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         input_state.rev_matrix[2] |= 0x80;
     }
 
-    // Handle C= key (Alt keys)
-    if (usb_mods & 0x44) {  // L/R Alt
+    // Handle C= key (L-Alt only - R-Alt is used for joystick fire)
+    if (usb_mods & 0x04) {  // L-Alt only
         input_state.key_matrix[7] &= ~0x20;  // C=
         input_state.rev_matrix[5] &= ~0x80;
     } else {
