@@ -549,6 +549,13 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
             continue;  // Don't pass keys to C64 when UI is visible
         }
 
+        // Filter out arrow keys - they're used for joystick emulation, not keyboard
+        // Arrow key codes from ps2kbd: 0x15=right, 0x0A=down, 0x0B=up
+        // Note: 0x08 is shared with backspace, so we don't filter it (left arrow uses joystick only)
+        if (key == 0x15 || key == 0x0A || key == 0x0B) {
+            continue;  // Skip arrow keys - used for joystick
+        }
+
         int c64_key = ascii_to_c64_matrix(key);
         if (c64_key >= 0) {
             set_c64_key(c64_key, pressed != 0);
@@ -657,7 +664,7 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     // NES: Right=0x01, Left=0x02, Down=0x04, Up=0x08, Start=0x10, Select=0x20, B=0x40, A=0x80
     // C64: Up=0x01, Down=0x02, Left=0x04, Right=0x08, Fire=0x10
 
-    uint8_t joy = 0x1F;  // All released
+    uint8_t joy = 0xFF;  // All released (must be 0xFF to not interfere with keyboard)
 
     if (pad & 0x08) joy &= ~0x01;  // Up
     if (pad & 0x04) joy &= ~0x02;  // Down
@@ -671,14 +678,22 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     if (!disk_ui_is_visible()) {
         // Arrow keys: ps2kbd_get_arrow_state() returns bits: 0=right, 1=left, 2=down, 3=up
         uint8_t arrows = ps2kbd_get_arrow_state();
+        uint8_t mods = ps2kbd_get_modifiers();
+
         if (arrows & 0x08) joy &= ~0x01;  // Up (bit 3)
         if (arrows & 0x04) joy &= ~0x02;  // Down (bit 2)
         if (arrows & 0x02) joy &= ~0x04;  // Left (bit 1)
         if (arrows & 0x01) joy &= ~0x08;  // Right (bit 0)
 
         // R-Ctrl (0x10) or R-Alt (0x40) for fire button
-        uint8_t mods = ps2kbd_get_modifiers();
         if (mods & 0x50) joy &= ~0x10;  // R-Ctrl=0x10, R-Alt=0x40
+
+        // Debug - show when joystick state changes
+        static uint8_t last_joy = 0xFF;
+        if (joy != last_joy) {
+            printf("JOY: 0x%02X (arrows=0x%02X mods=0x%02X)\n", joy, arrows, mods);
+            last_joy = joy;
+        }
     }
 #endif
 
@@ -686,7 +701,7 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
 
     // Second joystick from second gamepad
     uint8_t pad2 = nespad_state2;
-    uint8_t joy2 = 0x1F;
+    uint8_t joy2 = 0xFF;
 
     if (pad2 & 0x08) joy2 &= ~0x01;
     if (pad2 & 0x04) joy2 &= ~0x02;

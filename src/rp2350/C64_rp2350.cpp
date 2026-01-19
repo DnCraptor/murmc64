@@ -601,7 +601,11 @@ bool c64_run_frame(void)
     c64->TheCIA1->Joystick2 = 0xff;
     c64->TheDisplay->PollKeyboard(c64->TheCIA1->KeyMatrix, c64->TheCIA1->RevMatrix, &c64->joykey);
 
-    // Apply joystick keyboard emulation
+    // Apply joystick to BOTH ports (different games use different ports)
+    // Port 1 = Joystick1, Port 2 = Joystick2
+    // Note: joykey is 0xFF when idle, only bits 0-4 are used for directions/fire
+    // Bits 5-7 stay at 1 so keyboard scanning isn't affected
+    c64->TheCIA1->Joystick1 &= c64->joykey;
     c64->TheCIA1->Joystick2 &= c64->joykey;
 
     // Update display
