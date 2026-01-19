@@ -814,10 +814,10 @@ void c64_load_file(const char *filename)
         c64_mount_disk(NULL, 0, filename);
 
         // Queue LOAD"*",8,1 command
-        // Note: C64 keyboard buffer is only 10 chars, so we need to be clever
-        // LOAD"*",8,1 is 12 chars - too long!
-        // Use: LOAD"*",8 (9 chars) + Return
-        c64_type_string("LOAD\"*\",8\r");
+        // C64 keyboard buffer is only 10 chars, LOAD"*",8,1 + CR is 12 chars
+        // Solution: Use C64 BASIC abbreviation - L + SHIFT+O (PETSCII $CF) = LOAD
+        // This gives us: L($4C) + shiftO($CF) + "*",8,1 + CR = exactly 10 chars
+        c64_type_string("L\xCF\"*\",8,1\r");
     } else {
         MII_DEBUG_PRINTF("Unsupported file type: %s\n", ext);
     }
