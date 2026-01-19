@@ -322,11 +322,10 @@ static void init_storage(void) {
 }
 
 static void init_audio(void) {
-    // DISABLED FOR DEBUGGING
-    // MII_DEBUG_PRINTF("Initializing I2S audio...\n");
-    // sid_i2s_init();
-    // MII_DEBUG_PRINTF("Audio initialized\n");
-    printf("Audio DISABLED for debugging\n");
+    printf("Initializing I2S audio...\n");
+    sid_i2s_init();
+    printf("I2S audio initialized (DATA=%d, CLK=%d/%d, %d Hz)\n",
+           I2S_DATA_PIN, I2S_CLOCK_PIN_BASE, I2S_CLOCK_PIN_BASE + 1, SID_SAMPLE_RATE);
 }
 
 //=============================================================================
@@ -431,6 +430,10 @@ static void emulator_main_loop(void) {
     bool first_frame = true;
     uint32_t last_time = rp2350_get_ticks_ms();
 
+    // Frame timing: PAL = 50 Hz = 20000 us per frame
+    const uint32_t FRAME_TIME_US = 20000;
+    uint64_t next_frame_time = rp2350_get_ticks_us();
+
     // Watchdog DISABLED for debugging
     // watchdog_enable(2000, true);
 
@@ -453,11 +456,35 @@ static void emulator_main_loop(void) {
         // Request buffer swap at next vsync (thread-safe)
         graphics_request_buffer_swap(g_front_buffer);
 
-        // Update audio (SID -> I2S) - DISABLED FOR DEBUGGING
-        // sid_i2s_update();
+        // Update audio (SID -> I2S)
+        sid_i2s_update();
 
         frame_count++;
         total_frames++;
+
+        // Frame pacing: wait until it's time for the next frame
+        // This ensures the emulation runs at exactly 50 fps (PAL)
+        next_frame_time += FRAME_TIME_US;
+        uint64_t now_us = rp2350_get_ticks_us();
+
+        if (now_us < next_frame_time) {
+            // Emulation is faster than real-time, wait
+            uint32_t wait_us = (uint32_t)(next_frame_time - now_us);
+            if (wait_us > 1000) {
+                // Sleep for most of the wait time (leave 1ms for precision)
+                sleep_us(wait_us - 1000);
+            }
+            // Spin-wait for the remaining time for precise timing
+            while (rp2350_get_ticks_us() < next_frame_time) {
+                tight_loop_contents();
+            }
+        } else {
+            // Emulation is slower than real-time, skip frame pacing
+            // Reset timing to avoid accumulating lag
+            if (now_us > next_frame_time + FRAME_TIME_US * 2) {
+                next_frame_time = now_us;
+            }
+        }
 
         // FPS tracking (silent)
         uint32_t now = rp2350_get_ticks_ms();

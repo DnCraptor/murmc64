@@ -133,9 +133,9 @@ private:
     uint8_t sample_res_filt[SAMPLE_BUF_SIZE];
     unsigned sample_in_ptr;
 
-    // Samples per raster line
-    unsigned samples_per_line;
-    unsigned sample_counter;
+    // Fractional sample counting (16.16 fixed point)
+    uint32_t samples_per_line_frac;  // Samples per line in 16.16 fixed point
+    uint32_t sample_accum;           // Fractional sample accumulator
 
     bool is6581;
 };
@@ -403,9 +403,14 @@ DigitalRenderer::DigitalRenderer(MOS6581 *sid) : the_sid(sid)
     // Calculate cycles per sample (16.16 fixed point)
     sid_cycles_frac = (uint32_t)((float)SID_FREQ / SAMPLE_FREQ * 65536.0f);
 
-    // Samples per raster line
-    samples_per_line = SAMPLE_FREQ / (SCREEN_FREQ * TOTAL_RASTERS);
-    if (samples_per_line < 1) samples_per_line = 1;
+    // Samples per raster line (16.16 fixed point for accurate timing)
+    // PAL: 44100 / (50 * 312) = 2.827 samples/line
+    // NTSC: 44100 / (60 * 263) = 2.795 samples/line
+    samples_per_line_frac = (uint32_t)((float)SAMPLE_FREQ / (SCREEN_FREQ * TOTAL_RASTERS) * 65536.0f);
+    sample_accum = 0;
+
+    printf("SID: SCREEN_FREQ=%d, TOTAL_RASTERS=%d, samples_per_line=%.3f\n",
+           SCREEN_FREQ, TOTAL_RASTERS, (float)samples_per_line_frac / 65536.0f);
 
     is6581 = (ThePrefs.SIDType == SIDTYPE_DIGITAL_6581);
 
@@ -442,7 +447,7 @@ void DigitalRenderer::Reset()
     memset(sample_mode_vol, 0, SAMPLE_BUF_SIZE);
     memset(sample_res_filt, 0, SAMPLE_BUF_SIZE);
 
-    sample_counter = 0;
+    sample_accum = 0;
 }
 
 void DigitalRenderer::Pause()
@@ -462,8 +467,15 @@ void DigitalRenderer::EmulateLine()
     sample_res_filt[sample_in_ptr] = res_filt;
     sample_in_ptr = (sample_in_ptr + 1) % SAMPLE_BUF_SIZE;
 
-    // Generate samples for this line
-    calc_samples(samples_per_line);
+    // Fractional sample counting: accumulate samples per line
+    // and generate the integer part, keeping fractional remainder
+    sample_accum += samples_per_line_frac;
+    unsigned samples_to_generate = sample_accum >> 16;  // Integer part
+    sample_accum &= 0xFFFF;  // Keep fractional part
+
+    if (samples_to_generate > 0) {
+        calc_samples(samples_to_generate);
+    }
 }
 
 void DigitalRenderer::WriteRegister(uint16_t adr, uint8_t byte)
@@ -734,6 +746,21 @@ int16_t DigitalRenderer::calc_single_sample()
 
 void DigitalRenderer::calc_samples(int count)
 {
+    // Debug: track sample generation rate
+    static uint32_t total_samples = 0;
+    static uint32_t report_counter = 0;
+
+    total_samples += count;
+    report_counter++;
+
+    // Report every 10000 calls (should be ~0.64 sec for PAL)
+    if (report_counter >= 10000) {
+        printf("SID: %lu samples in 10000 lines, buf=%d\n",
+               (unsigned long)total_samples, sid_get_buffer_fill());
+        total_samples = 0;
+        report_counter = 0;
+    }
+
     calc_filter();
 
     for (int i = 0; i < count; ++i) {
