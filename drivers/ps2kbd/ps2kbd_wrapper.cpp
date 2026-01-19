@@ -101,26 +101,21 @@ static uint8_t current_modifiers = 0;
 // Bits: 0=right, 1=left, 2=down, 3=up
 static uint8_t arrow_key_state = 0;
 
-// Track Space key for joystick fire (common C64 emulator setup)
-static bool space_key_pressed = false;
-
 // Track if Delete key is currently pressed (for Ctrl+Alt+Delete combo)
 static bool delete_key_pressed = false;
 
 static void key_handler(hid_keyboard_report_t *curr, hid_keyboard_report_t *prev) {
     // Store current modifiers for use in key mapping
     current_modifiers = curr->modifier;
-
-    // Update arrow key state, Space key, and Delete key from current report
+    
+    // Update arrow key state and Delete key from current report
     arrow_key_state = 0;
-    space_key_pressed = false;
     delete_key_pressed = false;
     for (int i = 0; i < 6; i++) {
         if (curr->keycode[i] == 0x4F) arrow_key_state |= 0x01;  // Right
         if (curr->keycode[i] == 0x50) arrow_key_state |= 0x02;  // Left
         if (curr->keycode[i] == 0x51) arrow_key_state |= 0x04;  // Down
         if (curr->keycode[i] == 0x52) arrow_key_state |= 0x08;  // Up
-        if (curr->keycode[i] == 0x2C) space_key_pressed = true;  // Space (HID_KEY_SPACE)
         if (curr->keycode[i] == 0x4C) delete_key_pressed = true;  // Delete
     }
     
@@ -203,11 +198,6 @@ uint8_t ps2kbd_get_modifiers(void) {
 // Returns: bits 0=right, 1=left, 2=down, 3=up
 uint8_t ps2kbd_get_arrow_state(void) {
     return arrow_key_state;
-}
-
-// Get Space key state for joystick fire
-bool ps2kbd_get_space_state(void) {
-    return space_key_pressed;
 }
 
 // Check if Ctrl+Alt+Delete is pressed (for system reset)

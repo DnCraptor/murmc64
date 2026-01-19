@@ -603,12 +603,11 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
             continue;  // Don't pass keys to C64 when UI is visible
         }
 
-        // Filter out arrow keys and space - they're used for joystick emulation, not keyboard
+        // Filter out arrow keys - they're used for joystick emulation, not keyboard
         // Arrow key codes from ps2kbd: 0x15=right, 0x0A=down, 0x0B=up
-        // Space (0x20) is used for joystick fire
         // Note: 0x08 is shared with backspace, so we don't filter it (left arrow uses joystick only)
-        if (key == 0x15 || key == 0x0A || key == 0x0B || key == ' ') {
-            continue;  // Skip - used for joystick
+        if (key == 0x15 || key == 0x0A || key == 0x0B) {
+            continue;  // Skip arrow keys - used for joystick
         }
 
         int c64_key = ascii_to_c64_matrix(key);
@@ -808,14 +807,13 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         if (arrows & 0x02) joy &= ~0x04;  // Left (bit 1)
         if (arrows & 0x01) joy &= ~0x08;  // Right (bit 0)
 
-        // Fire button: R-Ctrl (0x10), R-Alt (0x40), or Space key
-        bool fire = (mods & 0x50) || ps2kbd_get_space_state();
-        if (fire) joy &= ~0x10;
+        // R-Ctrl (0x10) or R-Alt (0x40) for fire button
+        if (mods & 0x50) joy &= ~0x10;  // R-Ctrl=0x10, R-Alt=0x40
 
         // Debug - show when joystick state changes
         static uint8_t last_joy = 0xFF;
         if (joy != last_joy) {
-            printf("JOY: 0x%02X (arrows=0x%02X mods=0x%02X space=%d)\n", joy, arrows, mods, ps2kbd_get_space_state());
+            printf("JOY: 0x%02X (arrows=0x%02X mods=0x%02X)\n", joy, arrows, mods);
             last_joy = joy;
         }
     }
