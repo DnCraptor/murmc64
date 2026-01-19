@@ -354,6 +354,10 @@ static struct {
     bool joy_right;
     bool joy_fire;  // R-Ctrl or R-Alt
 
+    // Joystick port selection (1 or 2, directly maps to C64 port)
+    // Most games use port 2, but some use port 1
+    int joy_port;  // 1 or 2
+
     // PS/2 state
     bool ps2_extended;
     bool ps2_release;
@@ -382,6 +386,9 @@ void input_rp2350_init(void)
     // Initialize joysticks (all directions/buttons released)
     input_state.joystick1 = 0x1F;
     input_state.joystick2 = 0x1F;
+
+    // Default to joystick port 2 (most games use this)
+    input_state.joy_port = 2;
 
     // Initialize gamepad
     nespad_begin(CPU_CLOCK_MHZ * 1000, NESPAD_GPIO_CLK, NESPAD_GPIO_DATA, NESPAD_GPIO_LATCH);
@@ -515,6 +522,17 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     int pressed;
     unsigned char key;
     while (ps2kbd_get_key(&pressed, &key)) {
+        // F9 swaps joystick port (1 <-> 2)
+        if (key == 0xF9) {  // F9
+            static bool f9_was_pressed = false;
+            if (pressed && !f9_was_pressed) {
+                input_state.joy_port = (input_state.joy_port == 1) ? 2 : 1;
+                printf("Joystick port swapped to: %d\n", input_state.joy_port);
+            }
+            f9_was_pressed = pressed;
+            continue;
+        }
+
         // F10 toggles disk UI
         if (key == 0xFA) {  // F10
             static bool f10_was_pressed = false;
@@ -843,6 +861,12 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
 uint8_t input_get_joystick2(void)
 {
     return input_state.joystick2;
+}
+
+// Get current joystick port (1 or 2)
+int input_get_joy_port(void)
+{
+    return input_state.joy_port;
 }
 
 }  // extern "C"
