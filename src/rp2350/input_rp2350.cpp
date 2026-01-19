@@ -233,8 +233,18 @@ static inline int8_t get_extended_c64_key(uint8_t scancode) {
     }
 }
 
-// Map ASCII characters to C64 matrix position
+// Map ASCII/special characters to C64 matrix position (VICE-style layout)
 // Returns -1 if not mappable, or MATRIX(row, col) | 0x100 if shift needed
+// Special codes from ps2kbd_wrapper:
+//   0xE0 = <- (left arrow)
+//   0xE1 = Caps Lock (shift lock)
+//   0xE2 = ^ (up arrow)
+//   0xE3 = Insert (shift+DEL)
+//   0xE4 = Home (CLR/HOME)
+//   0xE5 = End (£ pound)
+//   0xF1-0xF8 = F1-F8
+//   0xFB = F11 (RESTORE - handled separately)
+//   0xFC = F12 (Reset - handled separately)
 static int ascii_to_c64_matrix(unsigned char key) {
     switch (key) {
         // Letters (uppercase)
@@ -277,31 +287,39 @@ static int ascii_to_c64_matrix(unsigned char key) {
         case '9': return MATRIX(4, 0);
         case '0': return MATRIX(4, 3);
 
-        // Punctuation
-        case ' ': return MATRIX(7, 4);
-        case ',': return MATRIX(5, 7);
-        case '.': return MATRIX(5, 4);
-        case '/': return MATRIX(6, 7);
-        case ';': return MATRIX(6, 2);
-        case ':': return MATRIX(5, 5);
-        case '=': return MATRIX(6, 5);
-        case '+': return MATRIX(5, 0);
-        case '-': return MATRIX(5, 3);
-        case '*': return MATRIX(6, 1);
-        case '@': return MATRIX(5, 6);
+        // Punctuation (VICE positional layout)
+        case ' ': return MATRIX(7, 4);   // Space
+        case ',': return MATRIX(5, 7);   // ,
+        case '.': return MATRIX(5, 4);   // .
+        case '/': return MATRIX(6, 7);   // /
+        case ';': return MATRIX(6, 5);   // ; (PC ' key -> C64 ;)
+        case ':': return MATRIX(5, 5);   // : (PC ; key -> C64 :)
+        case '=': return MATRIX(6, 5);   // = (Page Down -> =)
+        case '+': return MATRIX(5, 0);   // + (PC - key -> C64 +)
+        case '-': return MATRIX(5, 3);   // - (PC = key -> C64 -)
+        case '*': return MATRIX(6, 1);   // * (PC ] key -> C64 *)
+        case '@': return MATRIX(5, 6);   // @ (PC [ key -> C64 @)
 
         // Special keys
-        case 0x0D: return MATRIX(0, 1);  // Enter/Return
-        case 0x08: return MATRIX(0, 0);  // Backspace -> DEL
+        case 0x0D: return MATRIX(0, 1);  // Enter/Return -> RETURN
+        case 0x08: return MATRIX(0, 0);  // Backspace/Delete -> INS/DEL
         case 0x1B: return MATRIX(7, 7);  // Escape -> RUN/STOP
         case 0x09: return MATRIX(7, 2);  // Tab -> CTRL
 
-        // Arrow keys (from ps2kbd_wrapper)
-        case 0x15: return MATRIX(0, 2);  // Right (CTRL+U)
-        case 0x0A: return MATRIX(0, 7);  // Down (CTRL+J)
-        case 0x0B: return MATRIX(0, 7) | 0x100;  // Up (needs shift)
+        // Special C64 keys (codes from ps2kbd_wrapper)
+        case 0xE0: return MATRIX(7, 1);  // <- (left arrow, PC ` key)
+        case 0xE2: return MATRIX(6, 6);  // ^ (up arrow, PC \ key)
+        case 0xE3: return MATRIX(0, 0) | 0x100;  // Insert -> Shift+INS/DEL
+        case 0xE4: return MATRIX(6, 3);  // Home -> CLR/HOME
+        case 0xE5: return MATRIX(6, 0);  // End -> £ (pound)
 
-        // Function keys
+        // Arrow keys (directly mapped for cursor control)
+        // Note: These are filtered when joystick mode is active
+        case 0x15: return MATRIX(0, 2);  // Right arrow -> CRSR RIGHT
+        case 0x0A: return MATRIX(0, 7);  // Down arrow -> CRSR DOWN
+        case 0x0B: return MATRIX(0, 7) | 0x100;  // Up arrow -> CRSR UP (shift+down)
+
+        // Function keys (C64 has F1, F3, F5, F7; F2, F4, F6, F8 need shift)
         case 0xF1: return MATRIX(0, 4);  // F1
         case 0xF2: return MATRIX(0, 4) | 0x100;  // F2 (F1+shift)
         case 0xF3: return MATRIX(0, 5);  // F3
@@ -340,7 +358,14 @@ static struct {
     bool ps2_extended;
     bool ps2_release;
 
+    // Shift lock state (Caps Lock toggles this)
+    bool shift_lock;
+
 } input_state;
+
+// External C64 control functions
+extern "C" void c64_reset(void);
+extern "C" void c64_nmi(void);
 
 //=============================================================================
 // Input Functions
@@ -490,16 +515,45 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     int pressed;
     unsigned char key;
     while (ps2kbd_get_key(&pressed, &key)) {
-        // F11 toggles disk UI
-        if (key == 0xFB) {  // F11
-            if (pressed && !f11_was_pressed) {
+        // F10 toggles disk UI
+        if (key == 0xFA) {  // F10
+            static bool f10_was_pressed = false;
+            if (pressed && !f10_was_pressed) {
                 if (disk_ui_is_visible()) {
                     disk_ui_hide();
                 } else {
                     disk_ui_show();
                 }
             }
+            f10_was_pressed = pressed;
+            continue;
+        }
+
+        // F11 triggers RESTORE (NMI)
+        if (key == 0xFB) {  // F11
+            if (pressed && !f11_was_pressed) {
+                printf("F11: RESTORE (NMI)\n");
+                c64_nmi();
+            }
             f11_was_pressed = pressed;
+            continue;
+        }
+
+        // F12 triggers C64 reset
+        if (key == 0xFC) {  // F12
+            if (pressed) {
+                printf("F12: C64 Reset\n");
+                c64_reset();
+            }
+            continue;
+        }
+
+        // Caps Lock toggles shift lock
+        if (key == 0xE1) {  // Caps Lock
+            if (pressed) {
+                input_state.shift_lock = !input_state.shift_lock;
+                printf("Shift Lock: %s\n", input_state.shift_lock ? "ON" : "OFF");
+            }
             continue;
         }
 
@@ -562,14 +616,33 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         }
     }
 
-    // Handle shift key from modifiers
+    // Handle shift key from modifiers and shift lock
     uint8_t mods = ps2kbd_get_modifiers();
-    if (mods & 0x22) {  // L/R Shift
+    bool shift_active = (mods & 0x22) || input_state.shift_lock;  // L/R Shift or Shift Lock
+    if (shift_active) {
         input_state.key_matrix[1] &= ~0x80;  // Left shift
         input_state.rev_matrix[7] &= ~0x02;
     } else {
         input_state.key_matrix[1] |= 0x80;
         input_state.rev_matrix[7] |= 0x02;
+    }
+
+    // Handle Ctrl key (L-Ctrl)
+    if (mods & 0x11) {  // L/R Ctrl (but R-Ctrl used for joystick fire)
+        input_state.key_matrix[7] &= ~0x04;  // CTRL
+        input_state.rev_matrix[2] &= ~0x80;
+    } else {
+        input_state.key_matrix[7] |= 0x04;
+        input_state.rev_matrix[2] |= 0x80;
+    }
+
+    // Handle C= key (Alt keys, but R-Alt used for joystick fire)
+    if (mods & 0x44) {  // L/R Alt
+        input_state.key_matrix[7] &= ~0x20;  // C=
+        input_state.rev_matrix[5] &= ~0x80;
+    } else {
+        input_state.key_matrix[7] |= 0x20;
+        input_state.rev_matrix[5] |= 0x80;
     }
 #endif
 
@@ -580,16 +653,46 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     int pressed;
     unsigned char key;
     while (usbhid_wrapper_get_key(&pressed, &key)) {
-        // F11 toggles disk UI
-        if (key == 0xFB) {
-            if (pressed && !f11_was_pressed) {
+        // F10 toggles disk UI
+        if (key == 0xFA) {  // F10
+            static bool usb_f10_was_pressed = false;
+            if (pressed && !usb_f10_was_pressed) {
                 if (disk_ui_is_visible()) {
                     disk_ui_hide();
                 } else {
                     disk_ui_show();
                 }
             }
-            f11_was_pressed = pressed;
+            usb_f10_was_pressed = pressed;
+            continue;
+        }
+
+        // F11 triggers RESTORE (NMI)
+        if (key == 0xFB) {  // F11
+            static bool usb_f11_was_pressed = false;
+            if (pressed && !usb_f11_was_pressed) {
+                printf("F11: RESTORE (NMI)\n");
+                c64_nmi();
+            }
+            usb_f11_was_pressed = pressed;
+            continue;
+        }
+
+        // F12 triggers C64 reset
+        if (key == 0xFC) {  // F12
+            if (pressed) {
+                printf("F12: C64 Reset\n");
+                c64_reset();
+            }
+            continue;
+        }
+
+        // Caps Lock toggles shift lock
+        if (key == 0xE1) {  // Caps Lock
+            if (pressed) {
+                input_state.shift_lock = !input_state.shift_lock;
+                printf("Shift Lock: %s\n", input_state.shift_lock ? "ON" : "OFF");
+            }
             continue;
         }
 
@@ -645,14 +748,33 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         }
     }
 
-    // Handle shift key from USB modifiers
-    uint8_t mods = usbhid_wrapper_get_modifiers();
-    if (mods & 0x22) {  // L/R Shift
-        input_state.key_matrix[1] &= ~0x80;
+    // Handle shift key from USB modifiers and shift lock
+    uint8_t usb_mods = usbhid_wrapper_get_modifiers();
+    bool usb_shift_active = (usb_mods & 0x22) || input_state.shift_lock;  // L/R Shift or Shift Lock
+    if (usb_shift_active) {
+        input_state.key_matrix[1] &= ~0x80;  // Left shift
         input_state.rev_matrix[7] &= ~0x02;
     } else {
         input_state.key_matrix[1] |= 0x80;
         input_state.rev_matrix[7] |= 0x02;
+    }
+
+    // Handle Ctrl key (L-Ctrl)
+    if (usb_mods & 0x11) {  // L/R Ctrl
+        input_state.key_matrix[7] &= ~0x04;  // CTRL
+        input_state.rev_matrix[2] &= ~0x80;
+    } else {
+        input_state.key_matrix[7] |= 0x04;
+        input_state.rev_matrix[2] |= 0x80;
+    }
+
+    // Handle C= key (Alt keys)
+    if (usb_mods & 0x44) {  // L/R Alt
+        input_state.key_matrix[7] &= ~0x20;  // C=
+        input_state.rev_matrix[5] &= ~0x80;
+    } else {
+        input_state.key_matrix[7] |= 0x20;
+        input_state.rev_matrix[5] |= 0x80;
     }
 #endif
 

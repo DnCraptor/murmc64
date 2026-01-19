@@ -524,6 +524,17 @@ void c64_reset(void)
 
 
 /*
+ *  Trigger NMI (RESTORE key)
+ */
+void c64_nmi(void)
+{
+    if (TheC64) {
+        TheC64->NMI();
+    }
+}
+
+
+/*
  *  Run one frame of emulation
  *  Returns true when frame is complete
  */
