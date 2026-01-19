@@ -557,15 +557,6 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
             continue;
         }
 
-        // F12 triggers C64 reset
-        if (key == 0xFC) {  // F12
-            if (pressed) {
-                printf("F12: C64 Reset\n");
-                c64_reset();
-            }
-            continue;
-        }
-
         // Caps Lock toggles shift lock
         if (key == 0xE1) {  // Caps Lock
             if (pressed) {
@@ -662,6 +653,18 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         input_state.key_matrix[7] |= 0x20;
         input_state.rev_matrix[5] |= 0x80;
     }
+
+    // Ctrl+Alt+Delete triggers C64 reset
+    static bool reset_combo_was_active = false;
+    if (ps2kbd_is_reset_combo()) {
+        if (!reset_combo_was_active) {
+            printf("Ctrl+Alt+Del: C64 Reset\n");
+            c64_reset();
+        }
+        reset_combo_was_active = true;
+    } else {
+        reset_combo_was_active = false;
+    }
 #endif
 
 #ifdef USB_HID_ENABLED
@@ -693,15 +696,6 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
                 c64_nmi();
             }
             usb_f11_was_pressed = pressed;
-            continue;
-        }
-
-        // F12 triggers C64 reset
-        if (key == 0xFC) {  // F12
-            if (pressed) {
-                printf("F12: C64 Reset\n");
-                c64_reset();
-            }
             continue;
         }
 
