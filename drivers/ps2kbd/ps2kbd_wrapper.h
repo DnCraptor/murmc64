@@ -13,6 +13,7 @@ void ps2kbd_tick(void);
 int ps2kbd_get_key(int* pressed, unsigned char* key);
 uint8_t ps2kbd_get_modifiers(void);
 uint8_t ps2kbd_get_arrow_state(void);  // bits: 0=right, 1=left, 2=down, 3=up
+bool ps2kbd_get_space_state(void);     // Space key for joystick fire
 bool ps2kbd_is_reset_combo(void);      // Ctrl+Alt+Delete pressed
 
 #ifdef __cplusplus
