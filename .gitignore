@@ -1,0 +1,41 @@
+# Build directory
+build/
+
+# External dependencies (clone separately)
+pico-extras/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Compiled files
+*.o
+*.a
+*.elf
+*.uf2
+*.bin
+*.hex
+*.map
+*.dis
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Pico SDK generated
+generated/
+
+# Temporary files
+*.tmp
+*.bak

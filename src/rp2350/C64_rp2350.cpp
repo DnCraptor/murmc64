@@ -1,0 +1,719 @@
+/*
+ *  C64_rp2350.cpp - C64 emulator for RP2350
+ *
+ *  Frodo4 C64 Emulator - RP2350 Port
+ *
+ *  This implements the full C64 emulation using the Frodo4 core chips:
+ *  - MOS6510 (CPU)
+ *  - MOS6569 (VIC-II)
+ *  - MOS6581 (SID)
+ *  - MOS6526 (CIA1 & CIA2)
+ *  - MOS6502_1541 (1541 drive CPU)
+ *  - GCRDisk (1541 disk emulation)
+ *  - IEC (serial bus)
+ *
+ *  Core 0 runs all emulation.
+ *  Audio samples are sent to I2S via ring buffer (sid_i2s.cpp).
+ */
+
+#include "../sysdeps.h"
+#include "../C64.h"
+#include "../CPUC64.h"
+#include "../VIC.h"
+#include "../SID.h"
+#include "../CIA.h"
+#include "../IEC.h"
+#include "../Cartridge.h"
+#include "../1541gcr.h"
+#include "../CPU1541.h"
+#include "../Prefs.h"
+
+// RP2350-specific headers
+extern "C" {
+#include "debug_log.h"
+#include "pico/stdlib.h"
+#include "hardware/watchdog.h"
+}
+
+// Platform-specific
+#include "Display_rp2350.h"
+#include "ROM_data.h"
+#include "psram_allocator.h"
+
+#include <cstring>
+#include <cstdlib>
+
+// Global flag for Frodo SC mode
+bool IsFrodoSC = false;
+
+// Global C64 instance (simplified for RP2350)
+C64 *TheC64 = nullptr;
+
+// External display pointer
+static Display *g_display = nullptr;
+
+
+/*
+ *  C64 Constructor (simplified for RP2350)
+ */
+
+C64::C64() : quit_requested(false), prefs_editor_requested(false), load_snapshot_requested(false)
+{
+    printf("C64: Allocating memory...\n");
+
+    // Allocate RAM in PSRAM
+    RAM = (uint8_t *)psram_malloc(C64_RAM_SIZE);
+    Basic = (uint8_t *)psram_malloc(BASIC_ROM_SIZE);
+    Kernal = (uint8_t *)psram_malloc(KERNAL_ROM_SIZE);
+    Char = (uint8_t *)psram_malloc(CHAR_ROM_SIZE);
+    ROM1541 = (uint8_t *)psram_malloc(DRIVE_ROM_SIZE);
+    RAM1541 = (uint8_t *)psram_malloc(DRIVE_RAM_SIZE);
+
+    // Color RAM in regular SRAM for fast VIC access
+    Color = new uint8_t[COLOR_RAM_SIZE];
+
+    if (!RAM || !Basic || !Kernal || !Char || !Color || !ROM1541 || !RAM1541) {
+        printf("ERROR: Failed to allocate C64 memory!\n");
+        return;
+    }
+
+    printf("C64: Memory allocated OK\n");
+
+    // Open display
+    printf("C64: Creating Display...\n");
+    TheDisplay = new Display(this);
+    g_display = TheDisplay;
+    printf("C64: Display created\n");
+
+    // Initialize memory with powerup pattern
+    printf("C64: Initializing memory...\n");
+    init_memory();
+    printf("C64: Memory initialized\n");
+
+    // Load built-in ROMs
+    printf("C64: Loading ROMs...\n");
+    memcpy(Basic, BuiltinBasicROM, BASIC_ROM_SIZE);
+    memcpy(Kernal, BuiltinKernalROM, KERNAL_ROM_SIZE);
+    memcpy(Char, BuiltinCharROM, CHAR_ROM_SIZE);
+    memcpy(ROM1541, BuiltinDriveROM, DRIVE_ROM_SIZE);
+    printf("C64: ROMs loaded\n");
+
+    // Patch ROMs for IEC routines and fast reset
+    printf("C64: Patching ROMs...\n");
+    patch_roms(ThePrefs.FastReset, ThePrefs.Emul1541Proc, false);
+    printf("C64: ROMs patched\n");
+
+    printf("C64: Creating chips...\n");
+
+    // Create the chips
+    printf("  Creating CPU...\n");
+    TheCPU = new MOS6510(this, RAM, Basic, Kernal, Char, Color);
+    printf("  CPU created\n");
+
+    printf("  Creating 1541...\n");
+    TheGCRDisk = new GCRDisk(RAM1541);
+    TheCPU1541 = new MOS6502_1541(this, TheGCRDisk, RAM1541, ROM1541);
+    TheGCRDisk->SetCPU(TheCPU1541);
+    printf("  1541 created\n");
+
+    printf("  Creating VIC...\n");
+    TheVIC = new MOS6569(this, TheDisplay, TheCPU, RAM, Char, Color);
+    printf("  VIC created\n");
+
+    printf("  Creating SID...\n");
+    TheSID = new MOS6581;
+    printf("  SID created\n");
+
+    printf("  Creating CIAs...\n");
+    TheCIA1 = new MOS6526_1(TheCPU, TheVIC);
+    TheCIA2 = TheCPU1541->TheCIA2 = new MOS6526_2(TheCPU, TheVIC, TheCPU1541);
+    printf("  CIAs created\n");
+
+    printf("  Creating IEC...\n");
+    TheIEC = new IEC(this);
+    printf("  IEC created\n");
+
+    // No tape support on RP2350
+    TheTape = nullptr;
+
+    // No cartridge by default
+    TheCart = new NoCartridge;
+
+    TheCPU->SetChips(TheVIC, TheSID, TheCIA1, TheCIA2, TheCart, TheIEC, TheTape);
+
+    joykey = 0xff;
+    cycle_counter = 0;
+
+    printf("C64: Initialization complete\n");
+}
+
+
+/*
+ *  C64 Destructor
+ */
+
+C64::~C64()
+{
+    delete TheTape;
+    delete TheGCRDisk;
+    delete TheCart;
+    delete TheIEC;
+    delete TheCIA2;
+    delete TheCIA1;
+    delete TheSID;
+    delete TheVIC;
+    delete TheCPU1541;
+    delete TheCPU;
+    delete TheDisplay;
+
+    psram_free(RAM);
+    psram_free(Basic);
+    psram_free(Kernal);
+    psram_free(Char);
+    psram_free(ROM1541);
+    psram_free(RAM1541);
+    delete[] Color;
+}
+
+
+/*
+ *  Initialize emulation memory with powerup pattern
+ */
+
+void C64::init_memory()
+{
+    // Simplified powerup pattern (zeros with some standard values)
+    memset(RAM, 0, C64_RAM_SIZE);
+
+    // Set some standard power-on values
+    RAM[0x0000] = 0x2f;  // Data direction register
+    RAM[0x0001] = 0x37;  // CPU port
+
+    // Initialize color RAM with random values
+    for (unsigned i = 0; i < COLOR_RAM_SIZE; ++i) {
+        Color[i] = rand() & 0x0f;
+    }
+
+    // Clear 1541 RAM
+    memset(RAM1541, 0, DRIVE_RAM_SIZE);
+}
+
+
+/*
+ *  Apply ROM patch
+ */
+
+static void apply_patch(bool apply, uint8_t *rom, const uint8_t *builtin,
+                        uint16_t offset, unsigned size, const uint8_t *patch)
+{
+    if (apply) {
+        if (memcmp(rom + offset, builtin + offset, size) == 0) {
+            memcpy(rom + offset, patch, size);
+        }
+    } else {
+        if (memcmp(rom + offset, patch, size) == 0) {
+            memcpy(rom + offset, builtin + offset, size);
+        }
+    }
+}
+
+
+/*
+ *  Patch ROMs for fast reset and IEC emulation
+ */
+
+void C64::patch_roms(bool fast_reset, bool emul_1541_proc, bool auto_start)
+{
+    // Fast reset patch - skip RAM test
+    static const uint8_t fast_reset_patch[] = { 0xa0, 0x00 };
+    apply_patch(fast_reset, Kernal, BuiltinKernalROM, 0x1d84,
+                sizeof(fast_reset_patch), fast_reset_patch);
+
+    // IEC patches for non-processor-level disk emulation
+    static const uint8_t iec_patch_1[] = { 0xf2, 0x00 };  // IECOut
+    static const uint8_t iec_patch_2[] = { 0xf2, 0x01 };  // IECOutATN
+    static const uint8_t iec_patch_3[] = { 0xf2, 0x02 };  // IECOutSec
+    static const uint8_t iec_patch_4[] = { 0xf2, 0x03 };  // IECIn
+    static const uint8_t iec_patch_5[] = { 0xf2, 0x04 };  // IECSetATN
+    static const uint8_t iec_patch_6[] = { 0xf2, 0x05 };  // IECRelATN
+    static const uint8_t iec_patch_7[] = { 0xf2, 0x06 };  // IECTurnaround
+    static const uint8_t iec_patch_8[] = { 0xf2, 0x07 };  // IECRelease
+
+    apply_patch(!emul_1541_proc, Kernal, BuiltinKernalROM, 0x0d40,
+                sizeof(iec_patch_1), iec_patch_1);
+    apply_patch(!emul_1541_proc, Kernal, BuiltinKernalROM, 0x0d23,
+                sizeof(iec_patch_2), iec_patch_2);
+    apply_patch(!emul_1541_proc, Kernal, BuiltinKernalROM, 0x0d36,
+                sizeof(iec_patch_3), iec_patch_3);
+    apply_patch(!emul_1541_proc, Kernal, BuiltinKernalROM, 0x0e13,
+                sizeof(iec_patch_4), iec_patch_4);
+    apply_patch(!emul_1541_proc, Kernal, BuiltinKernalROM, 0x0def,
+                sizeof(iec_patch_5), iec_patch_5);
+    apply_patch(!emul_1541_proc, Kernal, BuiltinKernalROM, 0x0dbe,
+                sizeof(iec_patch_6), iec_patch_6);
+    apply_patch(!emul_1541_proc, Kernal, BuiltinKernalROM, 0x0dcc,
+                sizeof(iec_patch_7), iec_patch_7);
+    apply_patch(!emul_1541_proc, Kernal, BuiltinKernalROM, 0x0e03,
+                sizeof(iec_patch_8), iec_patch_8);
+
+    // 1541 patches - skip ROM checksum
+    static const uint8_t drive_patch_1[] = { 0xea, 0xea };
+    static const uint8_t drive_patch_2[] = { 0xf2, 0x00 };
+
+    apply_patch(true, ROM1541, BuiltinDriveROM, 0x2ae4,
+                sizeof(drive_patch_1), drive_patch_1);
+    apply_patch(true, ROM1541, BuiltinDriveROM, 0x2ae8,
+                sizeof(drive_patch_1), drive_patch_1);
+    apply_patch(true, ROM1541, BuiltinDriveROM, 0x2c9b,
+                sizeof(drive_patch_2), drive_patch_2);
+}
+
+
+/*
+ *  Reset C64
+ */
+
+void C64::Reset(bool clear_memory)
+{
+    TheCPU->AsyncReset();
+    TheCPU1541->AsyncReset();
+    TheGCRDisk->Reset();
+    TheSID->Reset();
+    TheCIA1->Reset();
+    TheCIA2->Reset();
+    TheIEC->Reset();
+    TheCart->Reset();
+
+    if (clear_memory) {
+        init_memory();
+    }
+
+    play_mode = PlayMode::Play;
+}
+
+
+/*
+ *  Reset C64 and auto-start from drive 8
+ */
+
+void C64::ResetAndAutoStart()
+{
+    patch_roms(ThePrefs.FastReset, ThePrefs.Emul1541Proc, true);
+    Reset(true);
+}
+
+
+/*
+ *  NMI C64
+ */
+
+void C64::NMI()
+{
+    TheCPU->AsyncNMI();
+}
+
+
+/*
+ *  Preferences have changed
+ */
+
+void C64::NewPrefs(const Prefs *prefs)
+{
+    TheDisplay->NewPrefs(prefs);
+    TheIEC->NewPrefs(prefs);
+    TheGCRDisk->NewPrefs(prefs);
+    TheSID->NewPrefs(prefs);
+
+    patch_roms(prefs->FastReset, prefs->Emul1541Proc, prefs->AutoStart);
+
+    if (ThePrefs.Emul1541Proc != prefs->Emul1541Proc) {
+        TheCPU1541->AsyncReset();
+    }
+}
+
+
+/*
+ *  Request emulator quit
+ */
+
+void C64::RequestQuit(int exit_code)
+{
+    main_loop_exit_code = exit_code;
+    quit_requested = true;
+}
+
+
+void C64::RequestPrefsEditor()
+{
+    prefs_editor_requested = true;
+}
+
+
+void C64::RequestLoadSnapshot(const std::string &path)
+{
+    requested_snapshot = path;
+    load_snapshot_requested = true;
+}
+
+
+/*
+ *  Mount disk drive (simplified for RP2350)
+ */
+
+void C64::MountDrive8(bool emul_1541_proc, const char *path)
+{
+    // Update preferences
+    auto prefs = ThePrefs;
+    prefs.DrivePath[0] = path;
+    prefs.Emul1541Proc = emul_1541_proc;
+    NewPrefs(&prefs);
+    ThePrefs = prefs;
+}
+
+
+void C64::MountDrive1(const char *path)
+{
+    // Tape not supported on RP2350
+}
+
+
+void C64::InsertCartridge(const std::string &path)
+{
+    // Simplified: no cartridge loading on RP2350
+}
+
+
+/*
+ *  Set play mode
+ */
+
+void C64::SetPlayMode(PlayMode mode)
+{
+    play_mode = mode;
+}
+
+
+/*
+ *  Tape controls (stubs - tape not supported on RP2350)
+ */
+
+void C64::SetTapeButtons(TapeState pressed) {}
+void C64::SetTapeControllerButton(bool pressed) {}
+void C64::RewindTape() {}
+void C64::ForwardTape() {}
+TapeState C64::TapeButtonState() const { return TapeState::Stop; }
+TapeState C64::TapeDriveState() const { return TapeState::Stop; }
+int C64::TapePosition() const { return 0; }
+
+
+/*
+ *  Drive LEDs and notifications
+ */
+
+void C64::SetDriveLEDs(int l0, int l1, int l2, int l3)
+{
+    TheDisplay->SetLEDs(l0, l1, l2, l3);
+}
+
+
+void C64::ShowNotification(std::string s)
+{
+    TheDisplay->ShowNotification(s);
+}
+
+
+/*
+ *  Snapshot functions (stubs - not implemented on RP2350)
+ */
+
+void C64::MakeSnapshot(Snapshot *s, bool instruction_boundary) {}
+void C64::RestoreSnapshot(const Snapshot *s) {}
+bool C64::SaveSnapshot(const std::string &filename, std::string &ret_error_msg)
+{
+    ret_error_msg = "Not supported on RP2350";
+    return false;
+}
+bool C64::LoadSnapshot(const std::string &filename, Prefs *prefs, std::string &ret_error_msg)
+{
+    ret_error_msg = "Not supported on RP2350";
+    return false;
+}
+
+
+/*
+ *  DMA Load (direct memory load)
+ */
+
+bool C64::DMALoad(const std::string &filename, std::string &ret_error_msg)
+{
+    ret_error_msg = "Use c64_load_prg() instead";
+    return false;
+}
+
+
+void C64::AutoStartOp() {}
+
+
+/*
+ *  Swap cartridge (simplified)
+ */
+
+void C64::swap_cartridge(int oldreu, const std::string &oldcart, int newreu, const std::string &newcart)
+{
+    // Simplified for RP2350 - no runtime cartridge swapping
+}
+
+
+/*
+ *  Keycode functions
+ */
+
+int KeycodeFromString(const std::string &s) { return -1; }
+const char *StringForKeycode(unsigned kc) { return ""; }
+bool IsSnapshotFile(const char *filename) { return false; }
+
+
+//=============================================================================
+// C Interface Functions (called from main_rp2350.c)
+//=============================================================================
+
+extern "C" {
+
+/*
+ *  Initialize the C64 emulator
+ */
+void c64_init(void)
+{
+    MII_DEBUG_PRINTF("c64_init: Creating C64...\n");
+    TheC64 = new C64();
+
+    // Reset all chips
+    TheC64->TheCPU->Reset();
+    TheC64->TheSID->Reset();
+    TheC64->TheCIA1->Reset();
+    TheC64->TheCIA2->Reset();
+    TheC64->TheCPU1541->Reset();
+    TheC64->TheGCRDisk->Reset();
+
+    MII_DEBUG_PRINTF("c64_init: C64 ready\n");
+}
+
+
+/*
+ *  Reset the C64 emulator
+ */
+void c64_reset(void)
+{
+    if (TheC64) {
+        TheC64->Reset(true);
+    }
+}
+
+
+/*
+ *  Run one frame of emulation
+ *  Returns true when frame is complete
+ */
+bool c64_run_frame(void)
+{
+    if (!TheC64) {
+        return false;
+    }
+
+    C64 *c64 = TheC64;
+
+    // Run one frame's worth of emulation (line-based)
+    bool frame_complete = false;
+    int line_count = 0;
+    const int MAX_LINES_PER_FRAME = 400;  // Safety limit (PAL has 312 lines)
+
+    while (!frame_complete && line_count < MAX_LINES_PER_FRAME) {
+        // Feed watchdog every 50 lines to prevent timeout during long frames
+        // DISABLED for debugging
+        // if ((line_count & 0x3F) == 0) {
+        //     watchdog_update();
+        // }
+
+        // Emulate one raster line
+        int cycles_left = 0;
+        unsigned vic_flags = c64->TheVIC->EmulateLine(cycles_left);
+
+        // SID emulation (audio samples)
+        c64->TheSID->EmulateLine();
+
+#if !PRECISE_CIA_CYCLES
+        // CIA timers
+        c64->TheCIA1->EmulateLine(ThePrefs.CIACycles);
+        c64->TheCIA2->EmulateLine(ThePrefs.CIACycles);
+#endif
+
+        // CPU and 1541 emulation
+        if (ThePrefs.Emul1541Proc) {
+            int cycles_1541 = ThePrefs.FloppyCycles;
+            c64->TheCPU1541->CountVIATimers(cycles_1541);
+
+            if (!c64->TheCPU1541->Idle) {
+                // 1541 active: alternately execute 6502 and 6510
+                int cycles = cycles_left;
+                int cpu_loops = 0;
+                const int MAX_CPU_LOOPS = 1000;  // Safety limit
+                while ((cycles >= 0 || cycles_1541 >= 0) && cpu_loops < MAX_CPU_LOOPS) {
+                    if (cycles > cycles_1541) {
+                        cycles -= c64->TheCPU->EmulateLine(1);
+                    } else {
+                        int used = c64->TheCPU1541->EmulateLine(1);
+                        cycles_1541 -= used;
+                        c64->cycle_counter += used;
+                    }
+                    cpu_loops++;
+                }
+            } else {
+                c64->TheCPU->EmulateLine(cycles_left);
+                c64->cycle_counter += CYCLES_PER_LINE;
+            }
+        } else {
+            // 1541 disabled, only emulate 6510
+            c64->TheCPU->EmulateLine(cycles_left);
+            c64->cycle_counter += CYCLES_PER_LINE;
+        }
+
+        line_count++;
+
+        // Check for VBlank (end of frame)
+        if (vic_flags & VIC_VBLANK) {
+            frame_complete = true;
+
+            // Count TOD clocks
+            c64->TheCIA1->CountTOD();
+            c64->TheCIA2->CountTOD();
+        }
+    }
+
+    // Debug: warn if we hit the safety limit
+    if (line_count >= MAX_LINES_PER_FRAME) {
+        static int overflow_count = 0;
+        if (++overflow_count <= 5) {
+            printf("WARNING: Frame exceeded %d lines!\n", MAX_LINES_PER_FRAME);
+        }
+    }
+
+    // Periodic debug: print memory/state info every 500 frames
+    static uint32_t debug_frame_count = 0;
+    debug_frame_count++;
+    if ((debug_frame_count % 500) == 0) {
+        printf("Frame %lu: lines=%d, PC=$%04X\n",
+               (unsigned long)debug_frame_count, line_count,
+               c64->TheCPU->GetPC());
+    }
+
+    // Poll input
+    c64->TheCIA1->Joystick1 = 0xff;
+    c64->TheCIA1->Joystick2 = 0xff;
+    c64->TheDisplay->PollKeyboard(c64->TheCIA1->KeyMatrix, c64->TheCIA1->RevMatrix, &c64->joykey);
+
+    // Apply joystick keyboard emulation
+    c64->TheCIA1->Joystick2 &= c64->joykey;
+
+    // Update display
+    c64->TheDisplay->Update();
+
+    return true;
+}
+
+
+/*
+ *  Get pointer to VIC framebuffer
+ */
+uint8_t *c64_get_framebuffer(void)
+{
+    if (g_display) {
+        return g_display->GetFramebuffer();
+    }
+    return nullptr;
+}
+
+
+/*
+ *  Get pointer to C64 RAM
+ */
+uint8_t *c64_get_ram(void)
+{
+    return TheC64 ? TheC64->RAM : nullptr;
+}
+
+
+/*
+ *  Set drive LEDs
+ */
+void c64_set_drive_leds(int l0, int l1, int l2, int l3)
+{
+    if (TheC64) {
+        TheC64->SetDriveLEDs(l0, l1, l2, l3);
+    }
+}
+
+
+/*
+ *  Show notification message
+ */
+void c64_show_notification(const char *msg)
+{
+    if (TheC64) {
+        TheC64->ShowNotification(msg);
+    }
+}
+
+
+/*
+ *  Mount a disk image
+ */
+void c64_mount_disk(const uint8_t *data, uint32_t size, const char *filename)
+{
+    MII_DEBUG_PRINTF("c64_mount_disk: %s (%lu bytes)\n",
+                     filename, (unsigned long)size);
+
+    if (TheC64) {
+        TheC64->MountDrive8(ThePrefs.Emul1541Proc, filename);
+    }
+}
+
+
+/*
+ *  Load a PRG file directly into RAM
+ */
+bool c64_load_prg(const uint8_t *data, uint32_t size)
+{
+    if (!TheC64 || !TheC64->RAM || size < 2) {
+        return false;
+    }
+
+    // First two bytes are load address (little endian)
+    uint16_t load_addr = data[0] | (data[1] << 8);
+    uint32_t prg_size = size - 2;
+
+    MII_DEBUG_PRINTF("c64_load_prg: Loading %lu bytes at $%04X\n",
+                     (unsigned long)prg_size, load_addr);
+
+    // Check bounds
+    if (load_addr + prg_size > C64_RAM_SIZE) {
+        prg_size = C64_RAM_SIZE - load_addr;
+    }
+
+    // Copy PRG data to RAM
+    memcpy(TheC64->RAM + load_addr, data + 2, prg_size);
+
+    // If loaded at BASIC start ($0801), set up BASIC pointers
+    if (load_addr == 0x0801) {
+        uint16_t end_addr = load_addr + prg_size;
+        TheC64->RAM[0x2d] = end_addr & 0xff;  // VARTAB low
+        TheC64->RAM[0x2e] = end_addr >> 8;    // VARTAB high
+        TheC64->RAM[0x2f] = TheC64->RAM[0x2d];  // ARYTAB
+        TheC64->RAM[0x30] = TheC64->RAM[0x2e];
+        TheC64->RAM[0x31] = TheC64->RAM[0x2d];  // STREND
+        TheC64->RAM[0x32] = TheC64->RAM[0x2e];
+    }
+
+    return true;
+}
+
+}  // extern "C"
