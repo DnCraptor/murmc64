@@ -20,6 +20,32 @@ extern "C" {
 #ifdef USB_HID_ENABLED
 #include "usbhid/usbhid_wrapper.h"
 #endif
+
+// Disk UI functions
+void disk_ui_init(void);
+void disk_ui_show(void);
+void disk_ui_hide(void);
+bool disk_ui_is_visible(void);
+void disk_ui_move_up(void);
+void disk_ui_move_down(void);
+int disk_ui_get_selected(void);
+void disk_ui_select(void);
+int disk_ui_get_state(void);
+void disk_ui_action_up(void);
+void disk_ui_action_down(void);
+int disk_ui_get_action(void);
+void disk_ui_confirm_action(void);
+void disk_ui_cancel_action(void);
+
+// Disk UI states (must match disk_ui.h)
+#define DISK_UI_HIDDEN        0
+#define DISK_UI_SELECT_FILE   1
+#define DISK_UI_SELECT_ACTION 2
+
+// Disk loader functions
+const char *disk_loader_get_path(int index);
+void c64_mount_disk(const uint8_t *data, uint32_t size, const char *filename);
+void c64_load_file(const char *filename);  // Load file and auto-run
 }
 
 #include <cstring>
@@ -338,6 +364,9 @@ void input_rp2350_init(void)
     usbhid_wrapper_init();
 #endif
 
+    // Initialize disk UI
+    disk_ui_init();
+
     printf("Input initialized\n");
 }
 
@@ -445,13 +474,73 @@ static void set_c64_key(int c64_key, bool pressed) {
 
 void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joystick)
 {
+    static bool f11_was_pressed = false;
+
 #if ENABLE_PS2_KEYBOARD
     // Poll PS/2 keyboard
     ps2kbd_tick();
     int pressed;
     unsigned char key;
     while (ps2kbd_get_key(&pressed, &key)) {
-        printf("PS2: key=0x%02X %s\n", key, pressed ? "DOWN" : "UP");
+        // F11 toggles disk UI
+        if (key == 0xFB) {  // F11
+            if (pressed && !f11_was_pressed) {
+                if (disk_ui_is_visible()) {
+                    disk_ui_hide();
+                } else {
+                    disk_ui_show();
+                }
+            }
+            f11_was_pressed = pressed;
+            continue;
+        }
+
+        // If disk UI is visible, handle navigation
+        if (disk_ui_is_visible()) {
+            if (pressed) {
+                int state = disk_ui_get_state();
+
+                if (state == DISK_UI_SELECT_FILE) {
+                    // File selection mode
+                    if (key == 0x0B || key == 0x52) {  // Up arrow
+                        disk_ui_move_up();
+                    } else if (key == 0x0A || key == 0x51) {  // Down arrow
+                        disk_ui_move_down();
+                    } else if (key == 0x0D) {  // Enter - show action menu
+                        disk_ui_select();
+                    } else if (key == 0x1B) {  // Escape - close UI
+                        disk_ui_hide();
+                    }
+                } else if (state == DISK_UI_SELECT_ACTION) {
+                    // Action selection mode
+                    if (key == 0x0B || key == 0x52) {  // Up arrow
+                        disk_ui_action_up();
+                    } else if (key == 0x0A || key == 0x51) {  // Down arrow
+                        disk_ui_action_down();
+                    } else if (key == 0x0D) {  // Enter - confirm action
+                        int sel = disk_ui_get_selected();
+                        int action = disk_ui_get_action();
+                        const char *path = disk_loader_get_path(sel);
+                        if (path) {
+                            if (action == 0) {
+                                // Load (run the disk/PRG)
+                                printf("Loading disk: %s\n", path);
+                                c64_load_file(path);
+                            } else {
+                                // Mount (just insert disk)
+                                printf("Mounting disk: %s\n", path);
+                                c64_mount_disk(NULL, 0, path);
+                            }
+                            disk_ui_confirm_action();
+                        }
+                    } else if (key == 0x1B) {  // Escape - back to file list
+                        disk_ui_cancel_action();
+                    }
+                }
+            }
+            continue;  // Don't pass keys to C64 when UI is visible
+        }
+
         int c64_key = ascii_to_c64_matrix(key);
         if (c64_key >= 0) {
             set_c64_key(c64_key, pressed != 0);
@@ -476,6 +565,65 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     int pressed;
     unsigned char key;
     while (usbhid_wrapper_get_key(&pressed, &key)) {
+        // F11 toggles disk UI
+        if (key == 0xFB) {
+            if (pressed && !f11_was_pressed) {
+                if (disk_ui_is_visible()) {
+                    disk_ui_hide();
+                } else {
+                    disk_ui_show();
+                }
+            }
+            f11_was_pressed = pressed;
+            continue;
+        }
+
+        // If disk UI is visible, handle navigation
+        if (disk_ui_is_visible()) {
+            if (pressed) {
+                int state = disk_ui_get_state();
+
+                if (state == DISK_UI_SELECT_FILE) {
+                    // File selection mode
+                    if (key == 0x0B || key == 0x52) {  // Up arrow
+                        disk_ui_move_up();
+                    } else if (key == 0x0A || key == 0x51) {  // Down arrow
+                        disk_ui_move_down();
+                    } else if (key == 0x0D) {  // Enter - show action menu
+                        disk_ui_select();
+                    } else if (key == 0x1B) {  // Escape - close UI
+                        disk_ui_hide();
+                    }
+                } else if (state == DISK_UI_SELECT_ACTION) {
+                    // Action selection mode
+                    if (key == 0x0B || key == 0x52) {  // Up arrow
+                        disk_ui_action_up();
+                    } else if (key == 0x0A || key == 0x51) {  // Down arrow
+                        disk_ui_action_down();
+                    } else if (key == 0x0D) {  // Enter - confirm action
+                        int sel = disk_ui_get_selected();
+                        int action = disk_ui_get_action();
+                        const char *path = disk_loader_get_path(sel);
+                        if (path) {
+                            if (action == 0) {
+                                // Load (run the disk/PRG)
+                                printf("Loading disk: %s\n", path);
+                                c64_load_file(path);
+                            } else {
+                                // Mount (just insert disk)
+                                printf("Mounting disk: %s\n", path);
+                                c64_mount_disk(NULL, 0, path);
+                            }
+                            disk_ui_confirm_action();
+                        }
+                    } else if (key == 0x1B) {  // Escape - back to file list
+                        disk_ui_cancel_action();
+                    }
+                }
+            }
+            continue;
+        }
+
         int c64_key = ascii_to_c64_matrix(key);
         if (c64_key >= 0) {
             set_c64_key(c64_key, pressed != 0);

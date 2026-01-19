@@ -21,6 +21,10 @@ extern uint8_t *framebuffers[2];
 
 // Input functions
 void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joystick);
+
+// Disk UI functions
+bool disk_ui_is_visible(void);
+void disk_ui_render(uint8_t *framebuffer);
 }
 
 #include "psram_allocator.h"
@@ -279,6 +283,11 @@ void Display::Update()
 
     // Draw overlays on top
     draw_overlays();
+
+    // Draw disk UI if visible
+    if (disk_ui_is_visible()) {
+        disk_ui_render(current_framebuffer);
+    }
 
     // The framebuffer swap is handled by the video task on Core 1
 }

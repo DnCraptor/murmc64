@@ -33,6 +33,7 @@ extern "C" {
 #include "debug_log.h"
 #include "pico/stdlib.h"
 #include "hardware/watchdog.h"
+#include "fatfs/ff.h"
 }
 
 // Platform-specific
@@ -319,14 +320,19 @@ void C64::NMI()
 
 void C64::NewPrefs(const Prefs *prefs)
 {
+    printf("NewPrefs: Emul1541Proc changing from %d to %d\n",
+           ThePrefs.Emul1541Proc, prefs->Emul1541Proc);
+
     TheDisplay->NewPrefs(prefs);
     TheIEC->NewPrefs(prefs);
     TheGCRDisk->NewPrefs(prefs);
     TheSID->NewPrefs(prefs);
 
+    printf("NewPrefs: calling patch_roms with emul_1541=%d\n", prefs->Emul1541Proc);
     patch_roms(prefs->FastReset, prefs->Emul1541Proc, prefs->AutoStart);
 
     if (ThePrefs.Emul1541Proc != prefs->Emul1541Proc) {
+        printf("NewPrefs: Resetting 1541 CPU\n");
         TheCPU1541->AsyncReset();
     }
 }
@@ -362,12 +368,19 @@ void C64::RequestLoadSnapshot(const std::string &path)
 
 void C64::MountDrive8(bool emul_1541_proc, const char *path)
 {
+    printf("MountDrive8: path=%s, emul_1541=%d\n", path, emul_1541_proc);
+
     // Update preferences
     auto prefs = ThePrefs;
     prefs.DrivePath[0] = path;
     prefs.Emul1541Proc = emul_1541_proc;
+
+    printf("MountDrive8: calling NewPrefs (old Emul1541Proc=%d)\n", ThePrefs.Emul1541Proc);
     NewPrefs(&prefs);
     ThePrefs = prefs;
+
+    printf("MountDrive8: done, ThePrefs.Emul1541Proc=%d, TheCPU1541->Idle=%d\n",
+           ThePrefs.Emul1541Proc, TheCPU1541->Idle);
 }
 
 
@@ -547,35 +560,10 @@ bool c64_run_frame(void)
         c64->TheCIA2->EmulateLine(ThePrefs.CIACycles);
 #endif
 
-        // CPU and 1541 emulation
-        if (ThePrefs.Emul1541Proc) {
-            int cycles_1541 = ThePrefs.FloppyCycles;
-            c64->TheCPU1541->CountVIATimers(cycles_1541);
-
-            if (!c64->TheCPU1541->Idle) {
-                // 1541 active: alternately execute 6502 and 6510
-                int cycles = cycles_left;
-                int cpu_loops = 0;
-                const int MAX_CPU_LOOPS = 1000;  // Safety limit
-                while ((cycles >= 0 || cycles_1541 >= 0) && cpu_loops < MAX_CPU_LOOPS) {
-                    if (cycles > cycles_1541) {
-                        cycles -= c64->TheCPU->EmulateLine(1);
-                    } else {
-                        int used = c64->TheCPU1541->EmulateLine(1);
-                        cycles_1541 -= used;
-                        c64->cycle_counter += used;
-                    }
-                    cpu_loops++;
-                }
-            } else {
-                c64->TheCPU->EmulateLine(cycles_left);
-                c64->cycle_counter += CYCLES_PER_LINE;
-            }
-        } else {
-            // 1541 disabled, only emulate 6510
-            c64->TheCPU->EmulateLine(cycles_left);
-            c64->cycle_counter += CYCLES_PER_LINE;
-        }
+        // CPU emulation
+        // Frodo's $f2 opcode mechanism handles IEC traps internally
+        c64->TheCPU->EmulateLine(cycles_left);
+        c64->cycle_counter += CYCLES_PER_LINE;
 
         line_count++;
 
@@ -601,9 +589,11 @@ bool c64_run_frame(void)
     static uint32_t debug_frame_count = 0;
     debug_frame_count++;
     if ((debug_frame_count % 500) == 0) {
-        printf("Frame %lu: lines=%d, PC=$%04X\n",
+        printf("Frame %lu: lines=%d, PC=$%04X, 1541: %s, Idle=%d\n",
                (unsigned long)debug_frame_count, line_count,
-               c64->TheCPU->GetPC());
+               c64->TheCPU->GetPC(),
+               ThePrefs.Emul1541Proc ? "ON" : "OFF",
+               c64->TheCPU1541->Idle);
     }
 
     // Poll input
@@ -665,16 +655,22 @@ void c64_show_notification(const char *msg)
 
 
 /*
- *  Mount a disk image
+ *  Mount a disk image using DOS-level IEC emulation
+ *  This uses Frodo's built-in IEC class with ImageDrive
  */
 void c64_mount_disk(const uint8_t *data, uint32_t size, const char *filename)
 {
-    MII_DEBUG_PRINTF("c64_mount_disk: %s (%lu bytes)\n",
-                     filename, (unsigned long)size);
+    (void)data;
+    (void)size;
 
-    if (TheC64) {
-        TheC64->MountDrive8(ThePrefs.Emul1541Proc, filename);
-    }
+    printf("c64_mount_disk: %s\n", filename);
+
+    // Use Frodo's built-in DOS-level IEC emulation
+    // false = DOS-level emulation (not processor-level 1541)
+    TheC64->MountDrive8(false, filename);
+
+    printf("c64_mount_disk: mounted via Frodo IEC (Emul1541Proc=%d)\n",
+           ThePrefs.Emul1541Proc);
 }
 
 
@@ -714,6 +710,102 @@ bool c64_load_prg(const uint8_t *data, uint32_t size)
     }
 
     return true;
+}
+
+/*
+ *  Type a string into the C64 keyboard buffer
+ *  The C64 keyboard buffer is at $0277-$0280 (10 bytes max)
+ *  Buffer length is at $C6
+ */
+void c64_type_string(const char *str)
+{
+    if (!TheC64 || !TheC64->RAM || !str) return;
+
+    int len = strlen(str);
+    if (len > 10) len = 10;  // C64 keyboard buffer is 10 bytes max
+
+    // Write to keyboard buffer at $0277
+    for (int i = 0; i < len; i++) {
+        TheC64->RAM[0x0277 + i] = str[i];
+    }
+
+    // Set buffer length at $C6
+    TheC64->RAM[0xC6] = len;
+
+    MII_DEBUG_PRINTF("c64_type_string: queued %d chars\n", len);
+}
+
+/*
+ *  Load a PRG/D64/G64 file from SD card
+ *  For PRG: loads into RAM and queues RUN
+ *  For D64/G64: mounts as disk drive and queues LOAD"*",8,1
+ */
+void c64_load_file(const char *filename)
+{
+    if (!filename) return;
+
+    MII_DEBUG_PRINTF("c64_load_file: %s\n", filename);
+
+    // Check file extension
+    const char *ext = strrchr(filename, '.');
+    if (!ext) {
+        MII_DEBUG_PRINTF("No file extension\n");
+        return;
+    }
+
+    if (strcasecmp(ext, ".prg") == 0) {
+        // Load PRG file into RAM
+        FIL file;
+        FRESULT fr = f_open(&file, filename, FA_READ);
+        if (fr != FR_OK) {
+            MII_DEBUG_PRINTF("Failed to open PRG file\n");
+            return;
+        }
+
+        FSIZE_t size = f_size(&file);
+        if (size < 3 || size > 65536) {
+            f_close(&file);
+            MII_DEBUG_PRINTF("Invalid PRG size: %lu\n", (unsigned long)size);
+            return;
+        }
+
+        // Allocate buffer for PRG data
+        uint8_t *buffer = (uint8_t *)psram_malloc(size);
+        if (!buffer) {
+            f_close(&file);
+            MII_DEBUG_PRINTF("Failed to allocate PRG buffer\n");
+            return;
+        }
+
+        // Read PRG data
+        UINT bytes_read;
+        fr = f_read(&file, buffer, size, &bytes_read);
+        f_close(&file);
+
+        if (fr != FR_OK || bytes_read != size) {
+            psram_free(buffer);
+            MII_DEBUG_PRINTF("Failed to read PRG file\n");
+            return;
+        }
+
+        // Load PRG into RAM
+        c64_load_prg(buffer, size);
+        psram_free(buffer);
+
+        // Queue RUN command (with Return key = 0x0D)
+        c64_type_string("RUN\r");
+    } else if (strcasecmp(ext, ".d64") == 0 || strcasecmp(ext, ".g64") == 0) {
+        // Mount disk image
+        c64_mount_disk(NULL, 0, filename);
+
+        // Queue LOAD"*",8,1 command
+        // Note: C64 keyboard buffer is only 10 chars, so we need to be clever
+        // LOAD"*",8,1 is 12 chars - too long!
+        // Use: LOAD"*",8 (9 chars) + Return
+        c64_type_string("LOAD\"*\",8\r");
+    } else {
+        MII_DEBUG_PRINTF("Unsupported file type: %s\n", ext);
+    }
 }
 
 }  // extern "C"

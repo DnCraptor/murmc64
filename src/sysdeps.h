@@ -114,6 +114,41 @@ void psram_free(void *ptr);
 #define C64_FREE(ptr)           psram_free(ptr)
 #define C64_REALLOC(ptr, size)  psram_realloc(ptr, size)
 
+// File I/O wrappers for FatFS
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// FatFS-based file operations
+typedef struct FATFS_FILE_HANDLE FATFS_FILE;
+FATFS_FILE *fatfs_fopen(const char *path, const char *mode);
+int fatfs_fclose(FATFS_FILE *fp);
+size_t fatfs_fread(void *ptr, size_t size, size_t nmemb, FATFS_FILE *fp);
+size_t fatfs_fwrite(const void *ptr, size_t size, size_t nmemb, FATFS_FILE *fp);
+int fatfs_fseek(FATFS_FILE *fp, long offset, int whence);
+long fatfs_ftell(FATFS_FILE *fp);
+int fatfs_feof(FATFS_FILE *fp);
+int fatfs_getc(FATFS_FILE *fp);
+int fatfs_putc(int c, FATFS_FILE *fp);
+void fatfs_rewind(FATFS_FILE *fp);
+
+#ifdef __cplusplus
+}
+#endif
+
+// Redirect stdio file operations to FatFS
+#define FILE            FATFS_FILE
+#define fopen           fatfs_fopen
+#define fclose          fatfs_fclose
+#define fread           fatfs_fread
+#define fwrite          fatfs_fwrite
+#define fseek           fatfs_fseek
+#define ftell           fatfs_ftell
+#define feof            fatfs_feof
+#define getc            fatfs_getc
+#define putc            fatfs_putc
+#define rewind          fatfs_rewind
+
 #else  // Desktop
 
 // Standard allocation on desktop

@@ -306,8 +306,9 @@ static void init_input(void) {
 static void init_storage(void) {
     MII_DEBUG_PRINTF("Initializing SD card...\n");
 
-    // Initialize SD card
-    FRESULT fr = f_mount(&(FATFS){0}, "", 1);
+    // Initialize SD card - FATFS must be static to persist after function returns!
+    static FATFS fatfs;
+    FRESULT fr = f_mount(&fatfs, "", 1);
     if (fr != FR_OK) {
         MII_DEBUG_PRINTF("SD card mount failed: %d\n", fr);
         MII_DEBUG_PRINTF("Continuing without disk support...\n");

@@ -146,6 +146,21 @@ const char *disk_loader_get_filename(int index)
     return disk_loader.entries[index].filename;
 }
 
+// Returns full path to disk image (static buffer - not thread safe)
+const char *disk_loader_get_path(int index)
+{
+    static char path_buffer[128];
+
+    if (index < 0 || index >= disk_loader.count) {
+        return NULL;
+    }
+
+    snprintf(path_buffer, sizeof(path_buffer), "%s/%s",
+             DISK_SCAN_PATH, disk_loader.entries[index].filename);
+
+    return path_buffer;
+}
+
 uint32_t disk_loader_get_size(int index)
 {
     if (index < 0 || index >= disk_loader.count) {

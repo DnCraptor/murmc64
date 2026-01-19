@@ -100,6 +100,40 @@ public:
 	void SetTapeSense(bool pressed);
 
 	uint16_t GetPC() const { return pc; }
+	void SetPC(uint16_t addr) { pc = addr; }
+
+	uint8_t GetA() const { return a; }
+	void SetA(uint8_t val) { a = val; }
+
+	uint8_t GetX() const { return x; }
+	void SetX(uint8_t val) { x = val; }
+
+	uint8_t GetY() const { return y; }
+	void SetY(uint8_t val) { y = val; }
+
+	uint8_t GetSP() const { return sp; }
+	void SetSP(uint8_t val) { sp = val; }
+
+	// Get processor status register (flags packed into byte)
+	uint8_t GetP() const {
+		return (n_flag & 0x80)
+		     | (v_flag ? 0x40 : 0)
+		     | 0x20  // Unused bit, always 1
+		     | (d_flag ? 0x08 : 0)
+		     | (i_flag ? 0x04 : 0)
+		     | ((z_flag == 0) ? 0x02 : 0)
+		     | (c_flag ? 0x01 : 0);
+	}
+
+	// Set processor status register (unpack byte into flags)
+	void SetP(uint8_t val) {
+		n_flag = val & 0x80;
+		v_flag = (val & 0x40) != 0;
+		d_flag = (val & 0x08) != 0;
+		i_flag = (val & 0x04) != 0;
+		z_flag = (val & 0x02) ? 0 : 1;  // Z flag set when result is 0
+		c_flag = (val & 0x01) != 0;
+	}
 
 	int ExtConfig;			// Memory configuration for ExtRead/WriteByte (0..7)
 

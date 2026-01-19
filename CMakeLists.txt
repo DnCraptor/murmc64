@@ -99,6 +99,7 @@ add_executable(murmfrodo4
     src/rp2350/input_rp2350.cpp
     src/rp2350/disk_loader.c
     src/rp2350/disk_ui.c
+    src/rp2350/fatfs_stdio.c
 
     # Frodo4 emulator core (C++) - full emulation
     src/CPUC64.cpp
@@ -108,11 +109,11 @@ add_executable(murmfrodo4
     src/IEC.cpp
     src/Cartridge.cpp
     src/REU.cpp
-    src/Tape.cpp
+    src/rp2350/Tape_stub.cpp  # Stub implementation for RP2350
     src/1541d64.cpp
-    src/1541t64.cpp
+    # src/1541t64.cpp  # Disabled for RP2350 (T64 tape archives not supported)
     src/1541gcr.cpp
-    src/1541fs.cpp
+    # src/1541fs.cpp   # Disabled for RP2350 (filesystem drive not supported)
     src/CPU1541.cpp
     src/VIA.cpp
 )
