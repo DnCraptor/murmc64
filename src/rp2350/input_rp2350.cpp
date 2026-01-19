@@ -45,7 +45,8 @@ void disk_ui_cancel_action(void);
 // Disk loader functions
 const char *disk_loader_get_path(int index);
 void c64_mount_disk(const uint8_t *data, uint32_t size, const char *filename);
-void c64_load_file(const char *filename);  // Load file and auto-run
+void c64_load_file(const char *filename);  // Load file and auto-run (D64/PRG/CRT)
+void c64_load_cartridge(const char *filename);  // Load CRT cartridge
 }
 
 #include <cstring>

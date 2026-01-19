@@ -32,7 +32,7 @@
 typedef struct {
     char filename[MAX_FILENAME_LEN];
     uint32_t size;
-    uint8_t type;  // 0=D64, 1=G64, 2=T64, 3=TAP
+    uint8_t type;  // 0=D64, 1=G64, 2=T64, 3=TAP, 4=PRG, 5=CRT
 } disk_entry_t;
 
 //=============================================================================
@@ -59,6 +59,7 @@ static int detect_file_type(const char *filename)
     if (strcasecmp(ext, ".t64") == 0) return 2;
     if (strcasecmp(ext, ".tap") == 0) return 3;
     if (strcasecmp(ext, ".prg") == 0) return 4;
+    if (strcasecmp(ext, ".crt") == 0) return 5;
 
     return -1;
 }

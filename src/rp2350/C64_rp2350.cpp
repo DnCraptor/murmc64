@@ -392,7 +392,35 @@ void C64::MountDrive1(const char *path)
 
 void C64::InsertCartridge(const std::string &path)
 {
-    // Simplified: no cartridge loading on RP2350
+    printf("InsertCartridge: %s\n", path.c_str());
+
+    if (path.empty()) {
+        // Remove cartridge
+        delete TheCart;
+        TheCart = new NoCartridge;
+        TheCPU->SetChips(TheVIC, TheSID, TheCIA1, TheCIA2, TheCart, TheIEC, TheTape);
+        ShowNotification("Cartridge removed");
+        return;
+    }
+
+    // Load cartridge from file
+    std::string error;
+    Cartridge *new_cart = Cartridge::FromFile(path, error);
+
+    if (new_cart) {
+        // Swap cartridge
+        delete TheCart;
+        TheCart = new_cart;
+        TheCPU->SetChips(TheVIC, TheSID, TheCIA1, TheCIA2, TheCart, TheIEC, TheTape);
+        ShowNotification("Cartridge inserted");
+        printf("Cartridge loaded successfully\n");
+
+        // Reset C64 to start cartridge
+        Reset(false);
+    } else {
+        printf("Failed to load cartridge: %s\n", error.c_str());
+        ShowNotification(error);
+    }
 }
 
 
@@ -491,6 +519,9 @@ bool IsSnapshotFile(const char *filename) { return false; }
 //=============================================================================
 
 extern "C" {
+
+// Forward declarations
+void c64_load_cartridge(const char *filename);
 
 /*
  *  Initialize the C64 emulator
@@ -821,9 +852,24 @@ void c64_load_file(const char *filename)
         // Solution: Use C64 BASIC abbreviation - L + SHIFT+O (PETSCII $CF) = LOAD
         // This gives us: L($4C) + shiftO($CF) + "*",8,1 + CR = exactly 10 chars
         c64_type_string("L\xCF\"*\",8,1\r");
+    } else if (strcasecmp(ext, ".crt") == 0) {
+        // Load cartridge image
+        c64_load_cartridge(filename);
     } else {
         MII_DEBUG_PRINTF("Unsupported file type: %s\n", ext);
     }
+}
+
+/*
+ *  Load a CRT cartridge file
+ */
+void c64_load_cartridge(const char *filename)
+{
+    if (!TheC64 || !filename) return;
+
+    MII_DEBUG_PRINTF("c64_load_cartridge: %s\n", filename);
+
+    TheC64->InsertCartridge(filename);
 }
 
 }  // extern "C"
