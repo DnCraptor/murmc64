@@ -41,7 +41,6 @@ C64: Z X C V B N M , . /
 | Tab         | CTRL           |
 | L-Ctrl      | CTRL           |
 | L-Alt       | C= (Commodore) |
-| R-Alt       | C= (Commodore) |
 | \           | ^ (up arrow)   |
 | Home        | CLR/HOME       |
 | End         | £ (pound)      |
@@ -50,25 +49,19 @@ C64: Z X C V B N M , . /
 | Insert      | Shift+INS/DEL  |
 | Delete      | INS/DEL        |
 
-### Function Keys
+### Function Keys and System Hotkeys
 
-| PC Key | C64 Key |
-|--------|---------|
-| F1     | F1      |
-| F2     | F2      |
-| F3     | F3      |
-| F4     | F4      |
-| F5     | F5      |
-| F6     | F6      |
-| F7     | F7      |
-| F8     | F8      |
-| F10    | Disk UI |
-| F11    | RESTORE |
-| F12    | Reset   |
+| PC Key        | Function           |
+|---------------|--------------------|
+| F1-F8         | C64 F1-F8          |
+| F9            | Swap joystick port |
+| F10           | Disk UI            |
+| F11           | RESTORE (NMI)      |
+| Ctrl+Alt+Del  | Reset C64          |
 
 ### Joystick Emulation
 
-Arrow keys and modifier keys can be used for joystick control:
+Arrow keys and modifier keys can be used for joystick control (active on port 2 by default):
 
 | Key           | Joystick Action |
 |---------------|-----------------|
@@ -78,6 +71,8 @@ Arrow keys and modifier keys can be used for joystick control:
 | Arrow Right   | Right           |
 | R-Ctrl        | Fire            |
 | R-Alt         | Fire            |
+
+Press **F9** to swap between joystick port 1 and port 2. Most games use port 2, but some use port 1.
 
 Note: When using arrow keys for joystick, they don't send cursor keys to the C64.
 
