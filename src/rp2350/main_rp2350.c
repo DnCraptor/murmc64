@@ -146,6 +146,11 @@ static void core1_video_task(void) {
 //=============================================================================
 
 static void init_clocks(void) {
+    // Initialize USB stdio BEFORE overclocking!
+    // USB CDC needs the default 48MHz USB clock to enumerate properly.
+    stdio_init_all();
+    sleep_ms(100);  // Give USB time to enumerate at default clock
+
     // Set voltage for the desired CPU speed
     vreg_set_voltage(CPU_VOLTAGE);
     sleep_ms(10);  // Let voltage stabilize
@@ -159,7 +164,7 @@ static void init_clocks(void) {
 }
 
 static void init_stdio(void) {
-    stdio_init_all();
+    // NOTE: stdio_init_all() was already called in init_clocks() before overclocking
 
 #if ENABLE_DEBUG_LOGS
     // Wait for USB CDC enumeration and terminal connection
