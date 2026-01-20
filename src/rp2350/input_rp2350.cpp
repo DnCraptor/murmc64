@@ -396,7 +396,7 @@ void input_rp2350_init(void)
 
 #if ENABLE_PS2_KEYBOARD
     // Initialize PS/2 keyboard
-    printf("Initializing PS/2 keyboard on CLK=%d DATA=%d\n", PS2_PIN_CLK, PS2_PIN_DATA);
+    MII_DEBUG_PRINTF("Initializing PS/2 keyboard on CLK=%d DATA=%d\n", PS2_PIN_CLK, PS2_PIN_DATA);
     ps2kbd_init();
 #endif
 
@@ -408,7 +408,7 @@ void input_rp2350_init(void)
     // Initialize disk UI
     disk_ui_init();
 
-    printf("Input initialized\n");
+    MII_DEBUG_PRINTF("Input initialized\n");
 }
 
 static void process_ps2_scancode(uint8_t scancode)
@@ -528,7 +528,7 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
             static bool f9_was_pressed = false;
             if (pressed && !f9_was_pressed) {
                 input_state.joy_port = (input_state.joy_port == 1) ? 2 : 1;
-                printf("Joystick port swapped to: %d\n", input_state.joy_port);
+                MII_DEBUG_PRINTF("Joystick port swapped to: %d\n", input_state.joy_port);
             }
             f9_was_pressed = pressed;
             continue;
@@ -551,7 +551,7 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         // F11 triggers RESTORE (NMI)
         if (key == 0xFB) {  // F11
             if (pressed && !f11_was_pressed) {
-                printf("F11: RESTORE (NMI)\n");
+                MII_DEBUG_PRINTF("F11: RESTORE (NMI)\n");
                 c64_nmi();
             }
             f11_was_pressed = pressed;
@@ -562,7 +562,7 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         if (key == 0xE1) {  // Caps Lock
             if (pressed) {
                 input_state.shift_lock = !input_state.shift_lock;
-                printf("Shift Lock: %s\n", input_state.shift_lock ? "ON" : "OFF");
+                MII_DEBUG_PRINTF("Shift Lock: %s\n", input_state.shift_lock ? "ON" : "OFF");
             }
             continue;
         }
@@ -596,11 +596,11 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
                         if (path) {
                             if (action == 0) {
                                 // Load (run the disk/PRG)
-                                printf("Loading disk: %s\n", path);
+                                MII_DEBUG_PRINTF("Loading disk: %s\n", path);
                                 c64_load_file(path);
                             } else {
                                 // Mount (just insert disk)
-                                printf("Mounting disk: %s\n", path);
+                                MII_DEBUG_PRINTF("Mounting disk: %s\n", path);
                                 c64_mount_disk(NULL, 0, path);
                             }
                             disk_ui_confirm_action();
@@ -659,7 +659,7 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     static bool reset_combo_was_active = false;
     if (ps2kbd_is_reset_combo()) {
         if (!reset_combo_was_active) {
-            printf("Ctrl+Alt+Del: C64 Reset\n");
+            MII_DEBUG_PRINTF("Ctrl+Alt+Del: C64 Reset\n");
             c64_reset();
         }
         reset_combo_was_active = true;
@@ -693,7 +693,7 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         if (usb_key == 0xFB) {  // F11
             static bool usb_f11_was_pressed = false;
             if (usb_pressed && !usb_f11_was_pressed) {
-                printf("F11: RESTORE (NMI)\n");
+                MII_DEBUG_PRINTF("F11: RESTORE (NMI)\n");
                 c64_nmi();
             }
             usb_f11_was_pressed = usb_pressed;
@@ -704,7 +704,7 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         if (usb_key == 0xE1) {  // Caps Lock
             if (usb_pressed) {
                 input_state.shift_lock = !input_state.shift_lock;
-                printf("Shift Lock: %s\n", input_state.shift_lock ? "ON" : "OFF");
+                MII_DEBUG_PRINTF("Shift Lock: %s\n", input_state.shift_lock ? "ON" : "OFF");
             }
             continue;
         }
@@ -738,11 +738,11 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
                         if (path) {
                             if (action == 0) {
                                 // Load (run the disk/PRG)
-                                printf("Loading disk: %s\n", path);
+                                MII_DEBUG_PRINTF("Loading disk: %s\n", path);
                                 c64_load_file(path);
                             } else {
                                 // Mount (just insert disk)
-                                printf("Mounting disk: %s\n", path);
+                                MII_DEBUG_PRINTF("Mounting disk: %s\n", path);
                                 c64_mount_disk(NULL, 0, path);
                             }
                             disk_ui_confirm_action();

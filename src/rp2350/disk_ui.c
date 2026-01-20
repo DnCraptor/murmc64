@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "board_config.h"
+#include "debug_log.h"
 #include "disk_ui.h"
 
 // Forward declarations for disk loader
@@ -235,13 +236,13 @@ void disk_ui_show(void) {
         ui_state = DISK_UI_SELECT_FILE;
         selected_file = 0;
         scroll_offset = 0;
-        printf("Disk UI: showing file selection\n");
+        MII_DEBUG_PRINTF("Disk UI: showing file selection\n");
     }
 }
 
 void disk_ui_hide(void) {
     ui_state = DISK_UI_HIDDEN;
-    printf("Disk UI: hidden\n");
+    MII_DEBUG_PRINTF("Disk UI: hidden\n");
 }
 
 void disk_ui_toggle(void) {
@@ -294,7 +295,7 @@ void disk_ui_select(void) {
     if (ui_state == DISK_UI_SELECT_FILE && disk_loader_get_count() > 0) {
         ui_state = DISK_UI_SELECT_ACTION;
         selected_action = 0;  // Default to "Load"
-        printf("Disk UI: showing action selection for file %d\n", selected_file);
+        MII_DEBUG_PRINTF("Disk UI: showing action selection for file %d\n", selected_file);
     }
 }
 
@@ -327,7 +328,7 @@ void disk_ui_confirm_action(void) {
 void disk_ui_cancel_action(void) {
     if (ui_state == DISK_UI_SELECT_ACTION) {
         ui_state = DISK_UI_SELECT_FILE;
-        printf("Disk UI: cancelled action, back to file selection\n");
+        MII_DEBUG_PRINTF("Disk UI: cancelled action, back to file selection\n");
     }
 }
 

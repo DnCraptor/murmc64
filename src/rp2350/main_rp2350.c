@@ -98,12 +98,12 @@ static uint8_t *g_back_buffer = g_framebuffer_b;
 //=============================================================================
 
 static void core1_video_task(void) {
-    printf("Core 1: Starting video task\n");
+    MII_DEBUG_PRINTF("Core 1: Starting video task\n");
 
     // Initialize HDMI IRQ handler on this core
-    printf("Core 1: Calling graphics_init_irq_on_this_core()...\n");
+    MII_DEBUG_PRINTF("Core 1: Calling graphics_init_irq_on_this_core()...\n");
     graphics_init_irq_on_this_core();
-    printf("Core 1: IRQ initialized\n");
+    MII_DEBUG_PRINTF("Core 1: IRQ initialized\n");
 
     uint32_t last_frame_count = 0;
     uint32_t debug_counter = 0;
@@ -135,7 +135,7 @@ static void core1_video_task(void) {
         hdmi_check_and_restart();
     }
 
-    printf("Core 1: Video task ending\n");
+    MII_DEBUG_PRINTF("Core 1: Video task ending\n");
 }
 
 //=============================================================================
@@ -158,6 +158,7 @@ static void init_clocks(void) {
 static void init_stdio(void) {
     stdio_init_all();
 
+#if ENABLE_DEBUG_LOGS
     // Wait for USB serial connection (5 second countdown)
     // This allows time to connect a terminal before boot messages scroll by
     printf("\n\nmurmfrodo4 - Starting in ");
@@ -199,6 +200,7 @@ static void init_stdio(void) {
     );
     printf("CPU: %d MHz, PSRAM: %d MHz\n", CPU_CLOCK_MHZ, PSRAM_MAX_FREQ_MHZ);
     printf("\n");
+#endif
 }
 
 static void init_psram(void) {
@@ -224,30 +226,30 @@ static void init_psram(void) {
 }
 
 static void init_graphics(void) {
-    printf("Initializing HDMI graphics...\n");
+    MII_DEBUG_PRINTF("Initializing HDMI graphics...\n");
 
     // Defer IRQ setup to Core 1
-    printf("  Setting defer IRQ to Core 1...\n");
+    MII_DEBUG_PRINTF("  Setting defer IRQ to Core 1...\n");
     graphics_set_defer_irq_to_core1(true);
 
     // Initialize HDMI
-    printf("  Calling graphics_init(g_out_HDMI)...\n");
+    MII_DEBUG_PRINTF("  Calling graphics_init(g_out_HDMI)...\n");
     graphics_init(g_out_HDMI);
-    printf("  graphics_init done\n");
+    MII_DEBUG_PRINTF("  graphics_init done\n");
 
     // Set resolution
-    printf("  Setting resolution %dx%d...\n", FB_WIDTH, FB_HEIGHT);
+    MII_DEBUG_PRINTF("  Setting resolution %dx%d...\n", FB_WIDTH, FB_HEIGHT);
     graphics_set_res(FB_WIDTH, FB_HEIGHT);
 
     // Set initial framebuffer
-    printf("  Setting initial framebuffer at %p...\n", (void*)g_front_buffer);
+    MII_DEBUG_PRINTF("  Setting initial framebuffer at %p...\n", (void*)g_front_buffer);
     graphics_set_buffer(g_front_buffer);
 
     // Clear framebuffers to black
     memset(g_framebuffer_a, 0, sizeof(g_framebuffer_a));
     memset(g_framebuffer_b, 0, sizeof(g_framebuffer_b));
 
-    printf("Graphics initialized: %dx%d\n", FB_WIDTH, FB_HEIGHT);
+    MII_DEBUG_PRINTF("Graphics initialized: %dx%d\n", FB_WIDTH, FB_HEIGHT);
 }
 
 static void init_c64_palette(void) {
@@ -295,12 +297,12 @@ static void init_c64_palette(void) {
 }
 
 static void init_input(void) {
-    printf("Initializing input devices...\n");
+    MII_DEBUG_PRINTF("Initializing input devices...\n");
 
     // Initialize all input (PS/2, USB HID, gamepad, key matrices)
     input_rp2350_init();
 
-    printf("Input initialized\n");
+    MII_DEBUG_PRINTF("Input initialized\n");
 }
 
 static void init_storage(void) {
@@ -322,9 +324,9 @@ static void init_storage(void) {
 }
 
 static void init_audio(void) {
-    printf("Initializing I2S audio...\n");
+    MII_DEBUG_PRINTF("Initializing I2S audio...\n");
     sid_i2s_init();
-    printf("I2S audio initialized (DATA=%d, CLK=%d/%d, %d Hz)\n",
+    MII_DEBUG_PRINTF("I2S audio initialized (DATA=%d, CLK=%d/%d, %d Hz)\n",
            I2S_DATA_PIN, I2S_CLOCK_PIN_BASE, I2S_CLOCK_PIN_BASE + 1, SID_SAMPLE_RATE);
 }
 
@@ -406,7 +408,7 @@ static void check_stack(const char *location) {
 //=============================================================================
 
 static void emulator_main_loop(void) {
-    printf("Starting C64 emulator...\n");
+    MII_DEBUG_PRINTF("Starting C64 emulator...\n");
     check_stack("emulator_main_loop start");
 
     // Set up framebuffer globals for Display_rp2350.cpp
@@ -416,13 +418,13 @@ static void emulator_main_loop(void) {
     current_fb_index = 1;
 
     // Initialize C64 emulator
-    printf("Calling c64_init()...\n");
+    MII_DEBUG_PRINTF("Calling c64_init()...\n");
     c64_init();
-    printf("c64_init() returned\n");
+    MII_DEBUG_PRINTF("c64_init() returned\n");
 
     // Signal to Core 1 that emulator is ready
     g_emulator_ready = true;
-    printf("Signaled Core 1, entering main loop...\n");
+    MII_DEBUG_PRINTF("Signaled Core 1, entering main loop...\n");
 
     // Main emulation loop
     uint32_t frame_count = 0;
@@ -442,9 +444,9 @@ static void emulator_main_loop(void) {
         // watchdog_update();
 
         // Run one frame of C64 emulation
-        if (first_frame) printf("Running first frame...\n");
+        if (first_frame) MII_DEBUG_PRINTF("Running first frame...\n");
         c64_run_frame();
-        if (first_frame) { printf("First frame done\n"); first_frame = false; }
+        if (first_frame) { MII_DEBUG_PRINTF("First frame done\n"); first_frame = false; }
 
         // Swap framebuffers
         uint8_t *temp = g_front_buffer;

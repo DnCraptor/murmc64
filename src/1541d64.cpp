@@ -55,10 +55,15 @@ enum {
 	CHMOD_DIRECT		// Direct buffer access ('#'), using buffer in 1541 RAM
 };
 
-// Directory track
+// Directory track (D64)
 constexpr unsigned DIR_TRACK = 18;
 
-// BAM structure
+// D81 constants
+constexpr unsigned D81_DIR_TRACK = 40;		// Directory track for D81
+constexpr unsigned D81_SECTORS_PER_TRACK = 40;	// All tracks have 40 sectors
+constexpr unsigned D81_NUM_TRACKS = 80;		// 80 tracks total
+
+// BAM structure (D64)
 enum {
 	BAM_DIR_TRACK = 0,		// Track...
 	BAM_DIR_SECTOR = 1,		// ...and sector of first directory block (unused)
@@ -68,6 +73,32 @@ enum {
 	BAM_DISK_ID = 162,		// Disk ID
 	BAM_FMT_CHAR = 165		// Format characters
 };
+
+// D81 Header structure (track 40, sector 0)
+enum {
+	D81_HDR_DIR_TRACK = 0,		// Track of first directory sector (40)
+	D81_HDR_DIR_SECTOR = 1,		// Sector of first directory sector (3)
+	D81_HDR_FMT_TYPE = 2,		// Format type ('D' = $44)
+	D81_HDR_DISK_NAME = 4,		// Disk name (16 bytes, padded with $A0)
+	D81_HDR_DISK_ID = 22,		// Disk ID (2 bytes)
+	D81_HDR_DOS_VERSION = 25,	// DOS Version ('3')
+	D81_HDR_DISK_VERSION = 26	// Disk version ('D')
+};
+
+// D81 BAM structure (track 40, sectors 1 and 2)
+enum {
+	D81_BAM_NEXT_TRACK = 0,		// Track of next BAM sector (40 for first, 0 for second)
+	D81_BAM_NEXT_SECTOR = 1,	// Sector of next BAM sector (2 for first, $FF for second)
+	D81_BAM_VERSION = 2,		// Version byte ('D' = $44)
+	D81_BAM_VERSION_COMPL = 3,	// One's complement of version ($BB)
+	D81_BAM_DISK_ID = 4,		// Disk ID (2 bytes, same as header)
+	D81_BAM_IO_BYTE = 6,		// I/O byte (bit 7: verify, bit 6: check header CRC)
+	D81_BAM_AUTOBOOT = 7,		// Auto-boot flag
+	D81_BAM_BITMAP = 16			// Start of BAM entries (6 bytes per track, 40 tracks per sector)
+};
+
+// D81 BAM entry size (6 bytes: 1 free count + 5 bytes for 40-bit bitmap)
+constexpr unsigned D81_BAM_ENTRY_SIZE = 6;
 
 // Directory structure
 enum {
@@ -90,11 +121,14 @@ enum {
 	SIZEOF_DE = 32			// Size of directory entry
 };
 
-// Interleave of directory and data blocks
+// Interleave of directory and data blocks (D64)
 constexpr unsigned DIR_INTERLEAVE = 3;
 constexpr unsigned DATA_INTERLEAVE = 10;
 
-// Number of sectors per track, for all tracks
+// D81 uses interleave of 1 for both directory and data
+constexpr unsigned D81_INTERLEAVE = 1;
+
+// Number of sectors per track, for all tracks (D64/X64)
 static const unsigned num_sectors[41] = {
 	0,
 	21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,
@@ -104,7 +138,7 @@ static const unsigned num_sectors[41] = {
 	17,17,17,17,17		// Tracks 36..40
 };
 
-// Accumulated number of sectors
+// Accumulated number of sectors (D64/X64)
 static const unsigned accum_num_sectors[41] = {
 	0,
 	0,21,42,63,84,105,126,147,168,189,210,231,252,273,294,315,336,
@@ -113,6 +147,11 @@ static const unsigned accum_num_sectors[41] = {
 	598,615,632,649,666,
 	683,700,717,734,751	// Tracks 36..40
 };
+
+// D81: All tracks have 40 sectors, simple calculation
+// Sectors for track n = 40, accumulated = (n-1) * 40
+inline unsigned d81_sectors_for_track(unsigned track) { return D81_SECTORS_PER_TRACK; }
+inline unsigned d81_accum_sectors(unsigned track) { return (track - 1) * D81_SECTORS_PER_TRACK; }
 
 // Prototypes
 static bool match(const uint8_t *p, int p_len, const uint8_t *n);
@@ -124,13 +163,15 @@ static bool parse_image_file(FILE *f, image_file_desc &desc);
  *  Constructor: Prepare emulation, open image file
  */
 
-ImageDrive::ImageDrive(IEC *iec, const std::string & filepath) : Drive(iec), the_file(nullptr), bam(ram + 0x700), bam_dirty(false)
+ImageDrive::ImageDrive(IEC *iec, const std::string & filepath) : Drive(iec), the_file(nullptr), bam(ram + 0x700), bam_dirty(false), bam2_dirty(false)
 {
 	desc.type = TYPE_D64;
 	desc.header_size = 0;
 	desc.num_tracks = 35;
 	desc.id1 = desc.id2 = 0;
 	desc.has_error_info = false;
+
+	memset(bam2, 0, sizeof(bam2));
 
 	for (unsigned i = 0; i < 18; ++i) {
 		ch[i].mode = CHMOD_FREE;
@@ -165,9 +206,22 @@ void ImageDrive::close_image()
 {
 	if (the_file) {
 		close_all_channels();
-		if (bam_dirty) {
-			write_sector(DIR_TRACK, 0, bam);
-			bam_dirty = false;
+		if (is_d81()) {
+			// D81: Write both BAM sectors if dirty
+			if (bam_dirty) {
+				write_sector(D81_DIR_TRACK, 1, bam);
+				bam_dirty = false;
+			}
+			if (bam2_dirty) {
+				write_sector(D81_DIR_TRACK, 2, bam2);
+				bam2_dirty = false;
+			}
+		} else {
+			// D64/X64: Write single BAM sector if dirty
+			if (bam_dirty) {
+				write_sector(DIR_TRACK, 0, bam);
+				bam_dirty = false;
+			}
 		}
 		fclose(the_file);
 		the_file = nullptr;
@@ -201,7 +255,15 @@ bool ImageDrive::change_image(const std::string & path)
 		}
 
 		// Read BAM
-		read_sector(DIR_TRACK, 0, bam);
+		if (is_d81()) {
+			// D81: Read both BAM sectors (40/1 and 40/2)
+			read_sector(D81_DIR_TRACK, 1, bam);
+			read_sector(D81_DIR_TRACK, 2, bam2);
+			bam2_dirty = false;
+		} else {
+			// D64/X64: Read single BAM sector (18/0)
+			read_sector(DIR_TRACK, 0, bam);
+		}
 		bam_dirty = false;
 		return true;
 	} else {
@@ -233,7 +295,7 @@ uint8_t ImageDrive::Open(int channel, const uint8_t *name, int name_len)
 
 	if (name[0] == '$') {
 		if (channel) {
-			return open_file_ts(channel, DIR_TRACK, 0);
+			return open_file_ts(channel, dir_track(), 0);
 		} else {
 			return open_directory(name + 1, name_len - 1);
 		}
@@ -441,9 +503,10 @@ uint8_t ImageDrive::create_file(int channel, const uint8_t *name, int name_len, 
 	uint8_t *de = dir + DIR_ENTRIES + ch[channel].entry * SIZEOF_DE;
 
 	// Allocate first data block
-	ch[channel].track = DIR_TRACK - 1;
-	ch[channel].sector = -DATA_INTERLEAVE;
-	if (!alloc_next_block(ch[channel].track, ch[channel].sector, DATA_INTERLEAVE)) {
+	int interleave = is_d81() ? D81_INTERLEAVE : DATA_INTERLEAVE;
+	ch[channel].track = dir_track() - 1;
+	ch[channel].sector = -interleave;
+	if (!alloc_next_block(ch[channel].track, ch[channel].sector, interleave)) {
 		free_buffer(buf);
 		return ST_OK;
 	}
@@ -513,7 +576,16 @@ uint8_t ImageDrive::open_directory(const uint8_t *pattern, int pattern_len)
 	*p++ = 0x12;	// RVS ON
 	*p++ = '\"';
 
-	uint8_t *q = bam + BAM_DISK_NAME;
+	// For D81, we need to read the header sector (40/0) for disk name
+	// For D64, the disk name is in the BAM
+	uint8_t header_buf[256];
+	uint8_t *q;
+	if (is_d81()) {
+		read_sector(D81_DIR_TRACK, 0, header_buf);
+		q = header_buf + D81_HDR_DISK_NAME;
+	} else {
+		q = bam + BAM_DISK_NAME;
+	}
 	for (unsigned i = 0; i < 23; ++i) {
 		int c;
 		if ((c = *q++) == 0xa0) {
@@ -526,11 +598,15 @@ uint8_t ImageDrive::open_directory(const uint8_t *pattern, int pattern_len)
 	*p++ = 0;
 
 	// Scan all directory blocks
-	dir[DIR_NEXT_TRACK] = DIR_TRACK;
-	dir[DIR_NEXT_SECTOR] = 1;
+	int dir_trk = dir_track();
+	int first_dir_sec = first_dir_sector();
+	unsigned max_dir_sectors = is_d81() ? D81_SECTORS_PER_TRACK : num_sectors[dir_trk];
+
+	dir[DIR_NEXT_TRACK] = dir_trk;
+	dir[DIR_NEXT_SECTOR] = first_dir_sec;
 
 	unsigned num_dir_blocks = 0;
-	while (dir[DIR_NEXT_TRACK] && num_dir_blocks < num_sectors[DIR_TRACK]) {
+	while (dir[DIR_NEXT_TRACK] && num_dir_blocks < max_dir_sectors) {
 		if (!read_sector(dir[DIR_NEXT_TRACK], dir[DIR_NEXT_SECTOR], dir))
 			return ST_OK;
 
@@ -607,8 +683,10 @@ uint8_t ImageDrive::open_directory(const uint8_t *pattern, int pattern_len)
 
 	// Final line, count number of free blocks
 	unsigned n = 0;
-	for (unsigned track = 1; track <= 35; ++track) {
-		if (track != DIR_TRACK)	{ // exclude track 18
+	unsigned max_trk = is_d81() ? D81_NUM_TRACKS : 35;
+	int dir_track_num = dir_track();
+	for (unsigned track = 1; track <= max_trk; ++track) {
+		if ((int)track != dir_track_num)	{ // exclude directory track
 			n += num_free_blocks(track);
 		}
 	}
@@ -928,14 +1006,34 @@ void ImageDrive::Reset()
 		buf_free[i] = true;
 	}
 
-	if (bam_dirty) {
-		write_sector(DIR_TRACK, 0, bam);
-		bam_dirty = false;
+	if (is_d81()) {
+		// D81: Write both BAM sectors if dirty
+		if (bam_dirty) {
+			write_sector(D81_DIR_TRACK, 1, bam);
+			bam_dirty = false;
+		}
+		if (bam2_dirty) {
+			write_sector(D81_DIR_TRACK, 2, bam2);
+			bam2_dirty = false;
+		}
+	} else {
+		// D64/X64: Write single BAM sector if dirty
+		if (bam_dirty) {
+			write_sector(DIR_TRACK, 0, bam);
+			bam_dirty = false;
+		}
 	}
 
 	memset(ram, 0, sizeof(ram));
 
-	read_sector(DIR_TRACK, 0, bam);
+	if (is_d81()) {
+		// D81: Read both BAM sectors
+		read_sector(D81_DIR_TRACK, 1, bam);
+		read_sector(D81_DIR_TRACK, 2, bam2);
+	} else {
+		// D64/X64: Read single BAM sector
+		read_sector(DIR_TRACK, 0, bam);
+	}
 
 	set_error(ERR_STARTUP);
 }
@@ -1010,18 +1108,19 @@ bool ImageDrive::find_file(const uint8_t *pattern, int pattern_len, int &dir_tra
 {
 	// Counter to prevent cyclic directories from resulting in an infinite loop
 	unsigned num_dir_blocks = 0;
+	unsigned max_dir_sectors = is_d81() ? D81_SECTORS_PER_TRACK : num_sectors[this->dir_track()];
 
 	// Pointer to current directory entry
 	uint8_t *de = nullptr;
 	if (cont) {
 		de = dir + DIR_ENTRIES + entry * SIZEOF_DE;
 	} else {
-		dir[DIR_NEXT_TRACK] = DIR_TRACK;
-		dir[DIR_NEXT_SECTOR] = 1;
+		dir[DIR_NEXT_TRACK] = this->dir_track();
+		dir[DIR_NEXT_SECTOR] = first_dir_sector();
 		entry = 8;
 	}
 
-	while (num_dir_blocks < num_sectors[DIR_TRACK]) {
+	while (num_dir_blocks < max_dir_sectors) {
 
 		// Goto next entry
 		entry++; de += SIZEOF_DE;
@@ -1065,8 +1164,8 @@ bool ImageDrive::find_next_file(const uint8_t *pattern, int pattern_len, int &di
 bool ImageDrive::alloc_dir_entry(int &track, int &sector, int &entry)
 {
 	// First look for free entry in existing directory blocks
-	dir[DIR_NEXT_TRACK] = DIR_TRACK;
-	dir[DIR_NEXT_SECTOR] = 1;
+	dir[DIR_NEXT_TRACK] = dir_track();
+	dir[DIR_NEXT_SECTOR] = first_dir_sector();
 	while (dir[DIR_NEXT_TRACK]) {
 		if (!read_sector(track = dir[DIR_NEXT_TRACK], sector = dir[DIR_NEXT_SECTOR], dir))
 			return false;
@@ -1082,7 +1181,8 @@ bool ImageDrive::alloc_dir_entry(int &track, int &sector, int &entry)
 
 	// No free entry found, allocate new directory block
 	int last_track = track, last_sector = sector;
-	if (!alloc_next_block(track, sector, DIR_INTERLEAVE))
+	int interleave = is_d81() ? D81_INTERLEAVE : DIR_INTERLEAVE;
+	if (!alloc_next_block(track, sector, interleave))
 		return false;
 	D(bug(" new directory block track %d, sector %d\n", track, sector));
 
@@ -1105,10 +1205,27 @@ bool ImageDrive::alloc_dir_entry(int &track, int &sector, int &entry)
 
 bool ImageDrive::is_block_free(int track, int sector)
 {
-	uint8_t *p = bam + BAM_BITMAP + (track - 1) * 4;
-	int byte = sector / 8 + 1;
-	int bit = sector & 7;
-	return p[byte] & (1 << bit);
+	if (is_d81()) {
+		// D81: 6 bytes per track, tracks 1-40 in bam, tracks 41-80 in bam2
+		uint8_t *p;
+		int bam_track;
+		if (track <= 40) {
+			p = bam + D81_BAM_BITMAP + (track - 1) * D81_BAM_ENTRY_SIZE;
+			bam_track = track;
+		} else {
+			p = bam2 + D81_BAM_BITMAP + (track - 41) * D81_BAM_ENTRY_SIZE;
+			bam_track = track - 40;
+		}
+		int byte = sector / 8 + 1;
+		int bit = sector & 7;
+		return p[byte] & (1 << bit);
+	} else {
+		// D64/X64: 4 bytes per track
+		uint8_t *p = bam + BAM_BITMAP + (track - 1) * 4;
+		int byte = sector / 8 + 1;
+		int bit = sector & 7;
+		return p[byte] & (1 << bit);
+	}
 }
 
 
@@ -1118,12 +1235,22 @@ bool ImageDrive::is_block_free(int track, int sector)
 
 int ImageDrive::num_free_blocks(int track)
 {
-	return bam[BAM_BITMAP + (track - 1) * 4];
+	if (is_d81()) {
+		// D81: 6 bytes per track, tracks 1-40 in bam, tracks 41-80 in bam2
+		if (track <= 40) {
+			return bam[D81_BAM_BITMAP + (track - 1) * D81_BAM_ENTRY_SIZE];
+		} else {
+			return bam2[D81_BAM_BITMAP + (track - 41) * D81_BAM_ENTRY_SIZE];
+		}
+	} else {
+		// D64/X64: 4 bytes per track
+		return bam[BAM_BITMAP + (track - 1) * 4];
+	}
 }
 
 
 /*
- *  Clear BAM, mark all blocks as free
+ *  Clear BAM, mark all blocks as free (D64/X64)
  */
 
 static void clear_bam(uint8_t *bam)
@@ -1137,6 +1264,26 @@ static void clear_bam(uint8_t *bam)
 	}
 }
 
+/*
+ *  Clear D81 BAM sector, mark specified tracks as free
+ *  bam_sector: pointer to the BAM sector (bam or bam2)
+ *  start_track: first track number in this BAM sector (1 or 41)
+ */
+
+static void clear_d81_bam_sector(uint8_t *bam_sector, unsigned start_track)
+{
+	// All tracks in D81 have 40 sectors, so bitmap is always 0xFF FF FF FF FF (40 bits)
+	for (unsigned i = 0; i < 40; ++i) {
+		uint8_t *entry = bam_sector + D81_BAM_BITMAP + i * D81_BAM_ENTRY_SIZE;
+		entry[0] = D81_SECTORS_PER_TRACK;  // 40 free sectors
+		entry[1] = 0xff;  // Sectors 0-7
+		entry[2] = 0xff;  // Sectors 8-15
+		entry[3] = 0xff;  // Sectors 16-23
+		entry[4] = 0xff;  // Sectors 24-31
+		entry[5] = 0xff;  // Sectors 32-39
+	}
+}
+
 
 /*
  *  Allocate block in BAM, returns error code
@@ -1144,25 +1291,55 @@ static void clear_bam(uint8_t *bam)
 
 int ImageDrive::alloc_block(int track, int sector)
 {
-	if (track < 1 || track > 35 || sector < 0 || sector >= num_sectors[track])
-		return ERR_ILLEGALTS;
+	uint8_t *p;
+	int byte, bit;
 
-	uint8_t *p = bam + BAM_BITMAP + (track - 1) * 4;
-	int byte = sector / 8 + 1;
-	int bit = sector & 7;
+	if (is_d81()) {
+		// D81: 80 tracks, 40 sectors per track
+		if (track < 1 || track > D81_NUM_TRACKS || sector < 0 || sector >= D81_SECTORS_PER_TRACK)
+			return ERR_ILLEGALTS;
 
-	// Block free?
-	if (p[byte] & (1 << bit)) {
+		if (track <= 40) {
+			p = bam + D81_BAM_BITMAP + (track - 1) * D81_BAM_ENTRY_SIZE;
+		} else {
+			p = bam2 + D81_BAM_BITMAP + (track - 41) * D81_BAM_ENTRY_SIZE;
+		}
+		byte = sector / 8 + 1;
+		bit = sector & 7;
 
-		// Yes, allocate and decrement free block count
-		D(bug("allocating block at track %d, sector %d\n", track, sector));
-		p[byte] &= ~(1 << bit);
-		p[0]--;
-		bam_dirty = true;
-		return ERR_OK;
-
+		// Block free?
+		if (p[byte] & (1 << bit)) {
+			D(bug("allocating block at track %d, sector %d\n", track, sector));
+			p[byte] &= ~(1 << bit);
+			p[0]--;
+			if (track <= 40) {
+				bam_dirty = true;
+			} else {
+				bam2_dirty = true;
+			}
+			return ERR_OK;
+		} else {
+			return ERR_NOBLOCK;
+		}
 	} else {
-		return ERR_NOBLOCK;
+		// D64/X64
+		if (track < 1 || track > 35 || sector < 0 || sector >= num_sectors[track])
+			return ERR_ILLEGALTS;
+
+		p = bam + BAM_BITMAP + (track - 1) * 4;
+		byte = sector / 8 + 1;
+		bit = sector & 7;
+
+		// Block free?
+		if (p[byte] & (1 << bit)) {
+			D(bug("allocating block at track %d, sector %d\n", track, sector));
+			p[byte] &= ~(1 << bit);
+			p[0]--;
+			bam_dirty = true;
+			return ERR_OK;
+		} else {
+			return ERR_NOBLOCK;
+		}
 	}
 }
 
@@ -1173,23 +1350,52 @@ int ImageDrive::alloc_block(int track, int sector)
 
 int ImageDrive::free_block(int track, int sector)
 {
-	if (track < 1 || track > 35 || sector < 0 || sector >= num_sectors[track])
-		return ERR_ILLEGALTS;
+	uint8_t *p;
+	int byte, bit;
 
-	uint8_t *p = bam + BAM_BITMAP + (track - 1) * 4;
-	int byte = sector / 8 + 1;
-	int bit = sector & 7;
+	if (is_d81()) {
+		// D81: 80 tracks, 40 sectors per track
+		if (track < 1 || track > D81_NUM_TRACKS || sector < 0 || sector >= D81_SECTORS_PER_TRACK)
+			return ERR_ILLEGALTS;
 
-	// Block allocated?
-	if (!(p[byte] & (1 << bit))) {
+		if (track <= 40) {
+			p = bam + D81_BAM_BITMAP + (track - 1) * D81_BAM_ENTRY_SIZE;
+		} else {
+			p = bam2 + D81_BAM_BITMAP + (track - 41) * D81_BAM_ENTRY_SIZE;
+		}
+		byte = sector / 8 + 1;
+		bit = sector & 7;
 
-		// Yes, free and increment free block count
-		D(bug("freeing block at track %d, sector %d\n", track, sector));
-		p[byte] |= (1 << bit);
-		p[0]++;
-		bam_dirty = true;
+		// Block allocated?
+		if (!(p[byte] & (1 << bit))) {
+			D(bug("freeing block at track %d, sector %d\n", track, sector));
+			p[byte] |= (1 << bit);
+			p[0]++;
+			if (track <= 40) {
+				bam_dirty = true;
+			} else {
+				bam2_dirty = true;
+			}
+		}
+		return ERR_OK;
+	} else {
+		// D64/X64
+		if (track < 1 || track > 35 || sector < 0 || sector >= num_sectors[track])
+			return ERR_ILLEGALTS;
+
+		p = bam + BAM_BITMAP + (track - 1) * 4;
+		byte = sector / 8 + 1;
+		bit = sector & 7;
+
+		// Block allocated?
+		if (!(p[byte] & (1 << bit))) {
+			D(bug("freeing block at track %d, sector %d\n", track, sector));
+			p[byte] |= (1 << bit);
+			p[0]++;
+			bam_dirty = true;
+		}
+		return ERR_OK;
 	}
-	return ERR_OK;
 }
 
 
@@ -1236,22 +1442,25 @@ bool ImageDrive::free_block_chain(int track, int sector)
 
 bool ImageDrive::alloc_next_block(int &track, int &sector, int interleave)
 {
+	int dir_trk = dir_track();
+	int max_track = is_d81() ? D81_NUM_TRACKS : 35;
+
 	// Find track with free blocks
 	bool side_changed = false;
 	while (num_free_blocks(track) == 0) {
-		if (track == DIR_TRACK) {	// Directory doesn't grow to other tracks
+		if (track == dir_trk) {	// Directory doesn't grow to other tracks
 full:		track = sector = 0;
 			set_error(ERR_DISKFULL);
 			return false;
-		} else if (track > DIR_TRACK) {
+		} else if (track > dir_trk) {
 			track++;
-			if (track > 35) {
+			if (track > max_track) {
 				if (!side_changed) {
 					side_changed = true;
 				} else {
 					goto full;
 				}
-				track = DIR_TRACK - 1;
+				track = dir_trk - 1;
 				sector = 0;
 			}
 		} else {
@@ -1262,28 +1471,29 @@ full:		track = sector = 0;
 				} else {
 					goto full;
 				}
-				track = DIR_TRACK + 1;
+				track = dir_trk + 1;
 				sector = 0;
 			}
 		}
 	}
 
 	// Find next free block on track
-	unsigned num = num_sectors[track];
+	unsigned num = is_d81() ? D81_SECTORS_PER_TRACK : num_sectors[track];
 	sector = sector + interleave;
-	if (sector >= num) {
+	if (sector >= (int)num) {
 		sector -= num;
 		if (sector) {
 			sector--;
 		}
 	}
+	unsigned sectors_per_track = is_d81() ? D81_SECTORS_PER_TRACK : num_sectors[track];
 	while (!is_block_free(track, sector)) {
 		sector++;
-		if (sector >= num_sectors[track]) {
+		if (sector >= (int)sectors_per_track) {
 			sector = 0;
 			while (!is_block_free(track, sector)) {
 				sector++;
-				if (sector >= num_sectors[track]) {
+				if (sector >= (int)sectors_per_track) {
 					// Something is wrong: the BAM free block count for this
 					// track was >0, but we found no free blocks
 					track = sector = 0;
@@ -1305,17 +1515,29 @@ full:		track = sector = 0;
 
 static long offset_from_ts(const image_file_desc &desc, int track, int sector)
 {
-	if ((track < 1) || (track > desc.num_tracks)
-	 || (sector < 0) || (sector >= num_sectors[track]))
-		return -1;
-
-	return ((accum_num_sectors[track] + sector) << 8) + desc.header_size;
+	if (desc.type == TYPE_D81) {
+		// D81: 80 tracks, 40 sectors per track
+		if ((track < 1) || (track > D81_NUM_TRACKS)
+		 || (sector < 0) || (sector >= D81_SECTORS_PER_TRACK))
+			return -1;
+		return ((d81_accum_sectors(track) + sector) << 8) + desc.header_size;
+	} else {
+		// D64/X64: Variable sectors per track
+		if ((track < 1) || (track > desc.num_tracks)
+		 || (sector < 0) || (sector >= num_sectors[track]))
+			return -1;
+		return ((accum_num_sectors[track] + sector) << 8) + desc.header_size;
+	}
 }
 
 // Get reference to error info byte of given track/sector
 static const uint8_t &error_info_for_sector(const image_file_desc &desc, int track, int sector)
 {
-	return desc.error_info[accum_num_sectors[track] + sector];
+	if (desc.type == TYPE_D81) {
+		return desc.error_info[d81_accum_sectors(track) + sector];
+	} else {
+		return desc.error_info[accum_num_sectors[track] + sector];
+	}
 }
 
 static const int conv_job_error[16] = {
@@ -1750,11 +1972,24 @@ void ImageDrive::initialize_cmd()
 {
 	// Close all channels and re-read BAM
 	close_all_channels();
-	if (bam_dirty) {
-		write_sector(DIR_TRACK, 0, bam);
-		bam_dirty = false;
+	if (is_d81()) {
+		if (bam_dirty) {
+			write_sector(D81_DIR_TRACK, 1, bam);
+			bam_dirty = false;
+		}
+		if (bam2_dirty) {
+			write_sector(D81_DIR_TRACK, 2, bam2);
+			bam2_dirty = false;
+		}
+		read_sector(D81_DIR_TRACK, 1, bam);
+		read_sector(D81_DIR_TRACK, 2, bam2);
+	} else {
+		if (bam_dirty) {
+			write_sector(DIR_TRACK, 0, bam);
+			bam_dirty = false;
+		}
+		read_sector(DIR_TRACK, 0, bam);
 	}
-	read_sector(DIR_TRACK, 0, bam);
 }
 
 // NEW:name,id
@@ -1762,6 +1997,12 @@ void ImageDrive::initialize_cmd()
 //  name   comma (or NULL)
 void ImageDrive::new_cmd(const uint8_t *name, int name_len, const uint8_t *comma)
 {
+	// D81 formatting is not yet fully supported
+	if (is_d81()) {
+		set_error(ERR_UNIMPLEMENTED);
+		return;
+	}
+
 	// Check for write-protection
 	if (write_protected) {
 		set_error(ERR_WRITEPROTECT);
@@ -1799,6 +2040,12 @@ void ImageDrive::new_cmd(const uint8_t *name, int name_len, const uint8_t *comma
 // VALIDATE
 void ImageDrive::validate_cmd()
 {
+	// D81 validate is not yet fully supported
+	if (is_d81()) {
+		set_error(ERR_UNIMPLEMENTED);
+		return;
+	}
+
 	// Backup of old BAM in case something goes amiss
 	uint8_t old_bam[256];
 	memcpy(old_bam, bam, 256);
@@ -1851,9 +2098,16 @@ static bool is_x64_file(const uint8_t *header, long size)
 	return memcmp(header, "C\x15\x41\x64\x01\x02", 6) == 0;
 }
 
+static bool is_d81_file(const uint8_t *header, long size)
+{
+	// D81: 80 tracks * 40 sectors * 256 bytes = 819200 bytes
+	// With error info: 819200 + 3200 = 822400 bytes
+	return size == NUM_SECTORS_D81 * 256 || size == NUM_SECTORS_D81 * 256 + NUM_SECTORS_D81;
+}
+
 bool IsDiskImageFile(const std::string & path, const uint8_t *header, long size)
 {
-	return is_d64_file(header, size) || is_x64_file(header, size);
+	return is_d64_file(header, size) || is_x64_file(header, size) || is_d81_file(header, size);
 }
 
 
@@ -1932,6 +2186,35 @@ static bool parse_x64_file(FILE *f, image_file_desc &desc)
 	return true;
 }
 
+static bool parse_d81_file(FILE *f, image_file_desc &desc)
+{
+	desc.type = TYPE_D81;
+	desc.header_size = 0;
+	desc.num_tracks = D81_NUM_TRACKS;
+
+	// Read header sector (40/0) to get disk ID (use error_info as buffer)
+	// D81 offset for track 40, sector 0: (40-1) * 40 * 256 = 39 * 40 * 256 = 399360
+	long header_offset = d81_accum_sectors(D81_DIR_TRACK) * 256;
+	fseek(f, header_offset, SEEK_SET);
+	fread(desc.error_info, 1, 256, f);
+	desc.id1 = desc.error_info[D81_HDR_DISK_ID];
+	desc.id2 = desc.error_info[D81_HDR_DISK_ID + 1];
+
+	// Read error info if present
+	fseek(f, 0, SEEK_END);
+	long size = ftell(f);
+	memset(desc.error_info, 1, sizeof(desc.error_info));
+	if (size == NUM_SECTORS_D81 * 256 + NUM_SECTORS_D81) {
+		fseek(f, NUM_SECTORS_D81 * 256, SEEK_SET);
+		fread(desc.error_info, NUM_SECTORS_D81, 1, f);
+		desc.has_error_info = true;
+	} else {
+		desc.has_error_info = false;
+	}
+
+	return true;
+}
+
 static bool parse_image_file(FILE *f, image_file_desc &desc)
 {
 	// Read header
@@ -1945,6 +2228,8 @@ static bool parse_image_file(FILE *f, image_file_desc &desc)
 	// Determine file type and fill in image_file_desc structure
 	if (is_x64_file(header, size)) {
 		return parse_x64_file(f, desc);
+	} else if (is_d81_file(header, size)) {
+		return parse_d81_file(f, desc);
 	} else if (is_d64_file(header, size)) {
 		return parse_d64_file(f, desc);
 	} else {
@@ -1972,12 +2257,25 @@ bool ReadDiskImageDirectory(const std::string & path, std::vector<c64_dir_entry>
 		if (!parse_image_file(f, desc))
 			goto done;
 
+		// Set directory track and first sector based on disk type
+		int dir_trk, first_dir_sec;
+		unsigned max_dir_sectors;
+		if (desc.type == TYPE_D81) {
+			dir_trk = D81_DIR_TRACK;
+			first_dir_sec = 3;  // D81 directory starts at sector 3
+			max_dir_sectors = D81_SECTORS_PER_TRACK;
+		} else {
+			dir_trk = DIR_TRACK;
+			first_dir_sec = 1;  // D64 directory starts at sector 1
+			max_dir_sectors = num_sectors[dir_trk];
+		}
+
 		// Scan all directory blocks
 		uint8_t dir[256];
-		dir[DIR_NEXT_TRACK] = DIR_TRACK;
-		dir[DIR_NEXT_SECTOR] = 1;
+		dir[DIR_NEXT_TRACK] = dir_trk;
+		dir[DIR_NEXT_SECTOR] = first_dir_sec;
 
-		while (dir[DIR_NEXT_TRACK] && num_dir_blocks < num_sectors[DIR_TRACK]) {
+		while (dir[DIR_NEXT_TRACK] && num_dir_blocks < max_dir_sectors) {
 			if (read_sector(f, desc, dir[DIR_NEXT_TRACK], dir[DIR_NEXT_SECTOR], dir) != ERR_OK)
 				break;
 			num_dir_blocks++;
@@ -2069,17 +2367,17 @@ bool CreateDiskImageFile(const std::string & path)
 
 static std::string next_image_file_name(const std::string & path)
 {
-	// ...Disk1.d64, ...(Disk 1).d64, ...[Disk A].d64 etc.
-	static const std::regex r1(R"(.*Dis[ck]\s?([A-Z1-9])[\]\)]?\.[dgx]64)");
+	// ...Disk1.d64, ...(Disk 1).d64, ...[Disk A].d64, ...[Disk A].d81 etc.
+	static const std::regex r1(R"(.*Dis[ck]\s?([A-Z1-9])[\]\)]?\.([dgx]64|d81))");
 
-	// ...Side1.d64, ...(Side 1).d64, ...[Side A].d64 etc.
-	static const std::regex r2(R"(.*Side\s?([A-Z1-9])[\]\)]?\.[dgx]64)");
+	// ...Side1.d64, ...(Side 1).d64, ...[Side A].d64, ...[Side A].d81 etc.
+	static const std::regex r2(R"(.*Side\s?([A-Z1-9])[\]\)]?\.([dgx]64|d81))");
 
-	// ...(1).d64, ...[A].d64 etc.
-	static const std::regex r3(R"(.*[\[\(]([A-Z1-9])[\]\)]\.[dgx]64)");
+	// ...(1).d64, ...[A].d64, ...[A].d81 etc.
+	static const std::regex r3(R"(.*[\[\(]([A-Z1-9])[\]\)]\.([dgx]64|d81))");
 
-	// ...1.d64, ...A.d64 etc.
-	static const std::regex r4(R"(.*([A-Z1-9])\.[dgx]64)");
+	// ...1.d64, ...A.d64, ...A.d81 etc.
+	static const std::regex r4(R"(.*([A-Z1-9])\.([dgx]64|d81))");
 
 	std::smatch m;
 	if (std::regex_match(path, m, r1) ||

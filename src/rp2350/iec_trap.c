@@ -12,6 +12,7 @@
 #include <string.h>
 #include "iec_trap.h"
 #include "iec.h"
+#include "debug_log.h"
 
 /*
  * Trap state
@@ -32,7 +33,7 @@ void iec_trap_init(void)
     traps_enabled = true;
     trap_initialized = true;
 
-    printf("IEC trap: initialized (enabled=%d, init=%d)\n", traps_enabled, trap_initialized);
+    MII_DEBUG_PRINTF("IEC trap: initialized (enabled=%d, init=%d)\n", traps_enabled, trap_initialized);
 }
 
 /*
@@ -253,7 +254,7 @@ bool iec_trap_check(uint16_t pc)
     static int iec_area_count = 0;
     if (pc >= 0xED00 && pc <= 0xEE20) {
         if (iec_area_count < 20) {
-            printf("IEC trap check: PC=$%04X\n", pc);
+            MII_DEBUG_PRINTF("IEC trap check: PC=$%04X\n", pc);
             iec_area_count++;
         }
     }
@@ -267,7 +268,7 @@ bool iec_trap_check(uint16_t pc)
         case KERNAL_UNTLK_IMPL:
         case KERNAL_UNLSN_IMPL:
         case KERNAL_ACPTR_IMPL:
-            printf("IEC TRAP HIT: PC=$%04X\n", pc);
+            MII_DEBUG_PRINTF("IEC TRAP HIT: PC=$%04X\n", pc);
             return true;
         default:
             return false;

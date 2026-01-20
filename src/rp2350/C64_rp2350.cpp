@@ -60,7 +60,7 @@ static Display *g_display = nullptr;
 
 C64::C64() : quit_requested(false), prefs_editor_requested(false), load_snapshot_requested(false)
 {
-    printf("C64: Allocating memory...\n");
+    MII_DEBUG_PRINTF("C64: Allocating memory...\n");
 
     // Allocate RAM in PSRAM
     RAM = (uint8_t *)psram_malloc(C64_RAM_SIZE);
@@ -74,65 +74,65 @@ C64::C64() : quit_requested(false), prefs_editor_requested(false), load_snapshot
     Color = new uint8_t[COLOR_RAM_SIZE];
 
     if (!RAM || !Basic || !Kernal || !Char || !Color || !ROM1541 || !RAM1541) {
-        printf("ERROR: Failed to allocate C64 memory!\n");
+        MII_DEBUG_PRINTF("ERROR: Failed to allocate C64 memory!\n");
         return;
     }
 
-    printf("C64: Memory allocated OK\n");
+    MII_DEBUG_PRINTF("C64: Memory allocated OK\n");
 
     // Open display
-    printf("C64: Creating Display...\n");
+    MII_DEBUG_PRINTF("C64: Creating Display...\n");
     TheDisplay = new Display(this);
     g_display = TheDisplay;
-    printf("C64: Display created\n");
+    MII_DEBUG_PRINTF("C64: Display created\n");
 
     // Initialize memory with powerup pattern
-    printf("C64: Initializing memory...\n");
+    MII_DEBUG_PRINTF("C64: Initializing memory...\n");
     init_memory();
-    printf("C64: Memory initialized\n");
+    MII_DEBUG_PRINTF("C64: Memory initialized\n");
 
     // Load built-in ROMs
-    printf("C64: Loading ROMs...\n");
+    MII_DEBUG_PRINTF("C64: Loading ROMs...\n");
     memcpy(Basic, BuiltinBasicROM, BASIC_ROM_SIZE);
     memcpy(Kernal, BuiltinKernalROM, KERNAL_ROM_SIZE);
     memcpy(Char, BuiltinCharROM, CHAR_ROM_SIZE);
     memcpy(ROM1541, BuiltinDriveROM, DRIVE_ROM_SIZE);
-    printf("C64: ROMs loaded\n");
+    MII_DEBUG_PRINTF("C64: ROMs loaded\n");
 
     // Patch ROMs for IEC routines and fast reset
-    printf("C64: Patching ROMs...\n");
+    MII_DEBUG_PRINTF("C64: Patching ROMs...\n");
     patch_roms(ThePrefs.FastReset, ThePrefs.Emul1541Proc, false);
-    printf("C64: ROMs patched\n");
+    MII_DEBUG_PRINTF("C64: ROMs patched\n");
 
-    printf("C64: Creating chips...\n");
+    MII_DEBUG_PRINTF("C64: Creating chips...\n");
 
     // Create the chips
-    printf("  Creating CPU...\n");
+    MII_DEBUG_PRINTF("  Creating CPU...\n");
     TheCPU = new MOS6510(this, RAM, Basic, Kernal, Char, Color);
-    printf("  CPU created\n");
+    MII_DEBUG_PRINTF("  CPU created\n");
 
-    printf("  Creating 1541...\n");
+    MII_DEBUG_PRINTF("  Creating 1541...\n");
     TheGCRDisk = new GCRDisk(RAM1541);
     TheCPU1541 = new MOS6502_1541(this, TheGCRDisk, RAM1541, ROM1541);
     TheGCRDisk->SetCPU(TheCPU1541);
-    printf("  1541 created\n");
+    MII_DEBUG_PRINTF("  1541 created\n");
 
-    printf("  Creating VIC...\n");
+    MII_DEBUG_PRINTF("  Creating VIC...\n");
     TheVIC = new MOS6569(this, TheDisplay, TheCPU, RAM, Char, Color);
-    printf("  VIC created\n");
+    MII_DEBUG_PRINTF("  VIC created\n");
 
-    printf("  Creating SID...\n");
+    MII_DEBUG_PRINTF("  Creating SID...\n");
     TheSID = new MOS6581;
-    printf("  SID created\n");
+    MII_DEBUG_PRINTF("  SID created\n");
 
-    printf("  Creating CIAs...\n");
+    MII_DEBUG_PRINTF("  Creating CIAs...\n");
     TheCIA1 = new MOS6526_1(TheCPU, TheVIC);
     TheCIA2 = TheCPU1541->TheCIA2 = new MOS6526_2(TheCPU, TheVIC, TheCPU1541);
-    printf("  CIAs created\n");
+    MII_DEBUG_PRINTF("  CIAs created\n");
 
-    printf("  Creating IEC...\n");
+    MII_DEBUG_PRINTF("  Creating IEC...\n");
     TheIEC = new IEC(this);
-    printf("  IEC created\n");
+    MII_DEBUG_PRINTF("  IEC created\n");
 
     // No tape support on RP2350
     TheTape = nullptr;
@@ -145,7 +145,7 @@ C64::C64() : quit_requested(false), prefs_editor_requested(false), load_snapshot
     joykey = 0xff;
     cycle_counter = 0;
 
-    printf("C64: Initialization complete\n");
+    MII_DEBUG_PRINTF("C64: Initialization complete\n");
 }
 
 
@@ -320,7 +320,7 @@ void C64::NMI()
 
 void C64::NewPrefs(const Prefs *prefs)
 {
-    printf("NewPrefs: Emul1541Proc changing from %d to %d\n",
+    MII_DEBUG_PRINTF("NewPrefs: Emul1541Proc changing from %d to %d\n",
            ThePrefs.Emul1541Proc, prefs->Emul1541Proc);
 
     TheDisplay->NewPrefs(prefs);
@@ -328,11 +328,11 @@ void C64::NewPrefs(const Prefs *prefs)
     TheGCRDisk->NewPrefs(prefs);
     TheSID->NewPrefs(prefs);
 
-    printf("NewPrefs: calling patch_roms with emul_1541=%d\n", prefs->Emul1541Proc);
+    MII_DEBUG_PRINTF("NewPrefs: calling patch_roms with emul_1541=%d\n", prefs->Emul1541Proc);
     patch_roms(prefs->FastReset, prefs->Emul1541Proc, prefs->AutoStart);
 
     if (ThePrefs.Emul1541Proc != prefs->Emul1541Proc) {
-        printf("NewPrefs: Resetting 1541 CPU\n");
+        MII_DEBUG_PRINTF("NewPrefs: Resetting 1541 CPU\n");
         TheCPU1541->AsyncReset();
     }
 }
@@ -368,18 +368,18 @@ void C64::RequestLoadSnapshot(const std::string &path)
 
 void C64::MountDrive8(bool emul_1541_proc, const char *path)
 {
-    printf("MountDrive8: path=%s, emul_1541=%d\n", path, emul_1541_proc);
+    MII_DEBUG_PRINTF("MountDrive8: path=%s, emul_1541=%d\n", path, emul_1541_proc);
 
     // Update preferences
     auto prefs = ThePrefs;
     prefs.DrivePath[0] = path;
     prefs.Emul1541Proc = emul_1541_proc;
 
-    printf("MountDrive8: calling NewPrefs (old Emul1541Proc=%d)\n", ThePrefs.Emul1541Proc);
+    MII_DEBUG_PRINTF("MountDrive8: calling NewPrefs (old Emul1541Proc=%d)\n", ThePrefs.Emul1541Proc);
     NewPrefs(&prefs);
     ThePrefs = prefs;
 
-    printf("MountDrive8: done, ThePrefs.Emul1541Proc=%d, TheCPU1541->Idle=%d\n",
+    MII_DEBUG_PRINTF("MountDrive8: done, ThePrefs.Emul1541Proc=%d, TheCPU1541->Idle=%d\n",
            ThePrefs.Emul1541Proc, TheCPU1541->Idle);
 }
 
@@ -392,7 +392,7 @@ void C64::MountDrive1(const char *path)
 
 void C64::InsertCartridge(const std::string &path)
 {
-    printf("InsertCartridge: %s\n", path.c_str());
+    MII_DEBUG_PRINTF("InsertCartridge: %s\n", path.c_str());
 
     if (path.empty()) {
         // Remove cartridge
@@ -413,12 +413,12 @@ void C64::InsertCartridge(const std::string &path)
         TheCart = new_cart;
         TheCPU->SetChips(TheVIC, TheSID, TheCIA1, TheCIA2, TheCart, TheIEC, TheTape);
         ShowNotification("Cartridge inserted");
-        printf("Cartridge loaded successfully\n");
+        MII_DEBUG_PRINTF("Cartridge loaded successfully\n");
 
         // Reset C64 to start cartridge
         Reset(false);
     } else {
-        printf("Failed to load cartridge: %s\n", error.c_str());
+        MII_DEBUG_PRINTF("Failed to load cartridge: %s\n", error.c_str());
         ShowNotification(error);
     }
 }
@@ -638,7 +638,7 @@ bool c64_run_frame(void)
     if (line_count >= MAX_LINES_PER_FRAME) {
         static int overflow_count = 0;
         if (++overflow_count <= 5) {
-            printf("WARNING: Frame exceeded %d lines!\n", MAX_LINES_PER_FRAME);
+            MII_DEBUG_PRINTF("WARNING: Frame exceeded %d lines!\n", MAX_LINES_PER_FRAME);
         }
     }
 
@@ -646,7 +646,7 @@ bool c64_run_frame(void)
     static uint32_t debug_frame_count = 0;
     debug_frame_count++;
     if ((debug_frame_count % 500) == 0) {
-        printf("Frame %lu: lines=%d, PC=$%04X, 1541: %s, Idle=%d\n",
+        MII_DEBUG_PRINTF("Frame %lu: lines=%d, PC=$%04X, 1541: %s, Idle=%d\n",
                (unsigned long)debug_frame_count, line_count,
                c64->TheCPU->GetPC(),
                ThePrefs.Emul1541Proc ? "ON" : "OFF",
@@ -712,13 +712,13 @@ void c64_mount_disk(const uint8_t *data, uint32_t size, const char *filename)
     (void)data;
     (void)size;
 
-    printf("c64_mount_disk: %s\n", filename);
+    MII_DEBUG_PRINTF("c64_mount_disk: %s\n", filename);
 
     // Use Frodo's built-in DOS-level IEC emulation
     // false = DOS-level emulation (not processor-level 1541)
     TheC64->MountDrive8(false, filename);
 
-    printf("c64_mount_disk: mounted via Frodo IEC (Emul1541Proc=%d)\n",
+    MII_DEBUG_PRINTF("c64_mount_disk: mounted via Frodo IEC (Emul1541Proc=%d)\n",
            ThePrefs.Emul1541Proc);
 }
 
@@ -785,9 +785,9 @@ void c64_type_string(const char *str)
 }
 
 /*
- *  Load a PRG/D64/G64 file from SD card
+ *  Load a PRG/D64/G64/D81 file from SD card
  *  For PRG: loads into RAM and queues RUN
- *  For D64/G64: mounts as disk drive and queues LOAD"*",8,1
+ *  For D64/G64/D81: mounts as disk drive and queues LOAD"*",8,1
  */
 void c64_load_file(const char *filename)
 {
@@ -843,8 +843,8 @@ void c64_load_file(const char *filename)
 
         // Queue RUN command (with Return key = 0x0D)
         c64_type_string("RUN\r");
-    } else if (strcasecmp(ext, ".d64") == 0 || strcasecmp(ext, ".g64") == 0) {
-        // Mount disk image
+    } else if (strcasecmp(ext, ".d64") == 0 || strcasecmp(ext, ".g64") == 0 || strcasecmp(ext, ".d81") == 0) {
+        // Mount disk image (D64, G64, or D81)
         c64_mount_disk(NULL, 0, filename);
 
         // Queue LOAD"*",8,1 command

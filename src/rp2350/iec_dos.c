@@ -30,6 +30,7 @@
 #include <string.h>
 #include "iec.h"
 #include "d64_drive.h"
+#include "debug_log.h"
 
 /*
  * IEC command codes
@@ -66,7 +67,7 @@ void iec_init(void)
     // Create drive (device 8 only)
     iec_bus.drive = d64_drive_create();
     if (iec_bus.drive == NULL) {
-        printf("IEC: Failed to create drive\n");
+        MII_DEBUG_PRINTF("IEC: Failed to create drive\n");
         return;
     }
 
@@ -75,7 +76,7 @@ void iec_init(void)
     iec_bus.listening = false;
 
     iec_initialized = true;
-    printf("IEC: DOS-level emulation initialized\n");
+    MII_DEBUG_PRINTF("IEC: DOS-level emulation initialized\n");
 }
 
 /*

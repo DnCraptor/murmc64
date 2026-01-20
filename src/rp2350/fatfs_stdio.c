@@ -5,9 +5,7 @@
 #include "fatfs_stdio.h"
 #include <string.h>
 #include <stdlib.h>
-
-// Forward declare printf to avoid stdio.h conflicts
-extern int printf(const char *format, ...);
+#include "debug_log.h"
 
 // Pool of file handles (FatFS doesn't support malloc for FIL structures well)
 #define MAX_OPEN_FILES 4
@@ -33,15 +31,15 @@ static FATFS_FILE *alloc_file(void) {
 
 FATFS_FILE *fatfs_fopen(const char *path, const char *mode) {
     if (!path || !mode) {
-        printf("fatfs_fopen: null path or mode\n");
+        MII_DEBUG_PRINTF("fatfs_fopen: null path or mode\n");
         return NULL;
     }
 
-    printf("fatfs_fopen: opening '%s' mode='%s'\n", path, mode);
+    MII_DEBUG_PRINTF("fatfs_fopen: opening '%s' mode='%s'\n", path, mode);
 
     FATFS_FILE *fp = alloc_file();
     if (!fp) {
-        printf("fatfs_fopen: no free file slots\n");
+        MII_DEBUG_PRINTF("fatfs_fopen: no free file slots\n");
         return NULL;
     }
 
@@ -67,11 +65,11 @@ FATFS_FILE *fatfs_fopen(const char *path, const char *mode) {
     // Open file
     FRESULT fr = f_open(&fp->fil, path, fatfs_mode);
     if (fr != FR_OK) {
-        printf("fatfs_fopen: f_open failed with error %d\n", fr);
+        MII_DEBUG_PRINTF("fatfs_fopen: f_open failed with error %d\n", fr);
         return NULL;
     }
 
-    printf("fatfs_fopen: success, size=%lu\n", (unsigned long)f_size(&fp->fil));
+    MII_DEBUG_PRINTF("fatfs_fopen: success, size=%lu\n", (unsigned long)f_size(&fp->fil));
     fp->is_open = 1;
     return fp;
 }

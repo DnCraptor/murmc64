@@ -21,6 +21,7 @@
 #include <ctype.h>
 #include "d64_drive.h"
 #include "iec.h"
+#include "debug_log.h"
 
 /*
  * Interleave values
@@ -150,6 +151,16 @@ int d64_sectors_per_track(int track)
  */
 uint32_t d64_offset_from_ts(const image_file_desc_t *desc, int track, int sector)
 {
+    // D81: Simple linear layout - all tracks have 40 sectors
+    if (desc->type == IMAGE_TYPE_D81) {
+        if (track < 1 || track > D81_NUM_TRACKS ||
+            sector < 0 || sector >= D81_SECTORS_PER_TRACK) {
+            return 0xFFFFFFFF;  // Invalid
+        }
+        return (((track - 1) * D81_SECTORS_PER_TRACK + sector) << 8) + desc->header_size;
+    }
+
+    // D64/X64: Variable sectors per track
     if (track < 1 || track > desc->num_tracks ||
         sector < 0 || sector >= num_sectors[track]) {
         return 0xFFFFFFFF;  // Invalid
@@ -197,7 +208,7 @@ iec_drive_t *d64_drive_create(void)
 {
     iec_drive_t *drive = (iec_drive_t *)malloc(sizeof(iec_drive_t));
     if (drive == NULL) {
-        printf("D64: Failed to allocate drive structure\n");
+        MII_DEBUG_PRINTF("D64: Failed to allocate drive structure\n");
         return NULL;
     }
 
@@ -260,16 +271,32 @@ void d64_drive_reset(iec_drive_t *drive)
     }
 
     // Write back BAM if dirty
-    if (drive->bam_dirty && drive->file_open) {
-        write_sector(drive, DIR_TRACK, 0, drive->bam);
-        drive->bam_dirty = false;
+    if (drive->file_open) {
+        if (drive->desc.type == IMAGE_TYPE_D81) {
+            if (drive->bam_dirty) {
+                write_sector(drive, D81_DIR_TRACK, 1, drive->bam);
+                drive->bam_dirty = false;
+            }
+            if (drive->bam2_dirty) {
+                write_sector(drive, D81_DIR_TRACK, 2, drive->bam2);
+                drive->bam2_dirty = false;
+            }
+        } else if (drive->bam_dirty) {
+            write_sector(drive, DIR_TRACK, 0, drive->bam);
+            drive->bam_dirty = false;
+        }
     }
 
     memset(drive->ram, 0, sizeof(drive->ram));
 
     // Re-read BAM if mounted
     if (drive->file_open) {
-        read_sector(drive, DIR_TRACK, 0, drive->bam);
+        if (drive->desc.type == IMAGE_TYPE_D81) {
+            read_sector(drive, D81_DIR_TRACK, 1, drive->bam);
+            read_sector(drive, D81_DIR_TRACK, 2, drive->bam2);
+        } else {
+            read_sector(drive, DIR_TRACK, 0, drive->bam);
+        }
     }
 
     d64_drive_set_error(drive, ERR_STARTUP, 0, 0);
@@ -284,7 +311,7 @@ bool d64_drive_mount(iec_drive_t *drive, const char *path)
 
     if (drive == NULL || path == NULL) return false;
 
-    printf("D64: Mounting %s\n", path);
+    MII_DEBUG_PRINTF("D64: Mounting %s\n", path);
 
     // Unmount current image
     d64_drive_unmount(drive);
@@ -297,7 +324,7 @@ bool d64_drive_mount(iec_drive_t *drive, const char *path)
         drive->write_protected = true;
         fr = f_open(&drive->file, path, FA_READ);
         if (fr != FR_OK) {
-            printf("D64: Failed to open %s: %d\n", path, fr);
+            MII_DEBUG_PRINTF("D64: Failed to open %s: %d\n", path, fr);
             return false;
         }
     }
@@ -312,18 +339,35 @@ bool d64_drive_mount(iec_drive_t *drive, const char *path)
         return false;
     }
 
-    // Read BAM (track 18, sector 0)
-    if (!read_sector(drive, DIR_TRACK, 0, drive->bam)) {
-        f_close(&drive->file);
-        drive->file_open = false;
-        return false;
+    // Read BAM
+    if (drive->desc.type == IMAGE_TYPE_D81) {
+        // D81: BAM is at track 40, sectors 1 and 2
+        if (!read_sector(drive, D81_DIR_TRACK, 1, drive->bam)) {
+            f_close(&drive->file);
+            drive->file_open = false;
+            return false;
+        }
+        // Read second BAM sector (tracks 41-80)
+        if (!read_sector(drive, D81_DIR_TRACK, 2, drive->bam2)) {
+            f_close(&drive->file);
+            drive->file_open = false;
+            return false;
+        }
+        drive->bam2_dirty = false;
+    } else {
+        // D64/X64: BAM is at track 18, sector 0
+        if (!read_sector(drive, DIR_TRACK, 0, drive->bam)) {
+            f_close(&drive->file);
+            drive->file_open = false;
+            return false;
+        }
     }
     drive->bam_dirty = false;
 
     drive->ready = true;
     d64_drive_set_error(drive, ERR_OK, 0, 0);
 
-    printf("D64: Mounted OK, %d tracks\n", drive->desc.num_tracks);
+    MII_DEBUG_PRINTF("D64: Mounted OK, %d tracks, type=%d\n", drive->desc.num_tracks, drive->desc.type);
 
     return true;
 }
@@ -339,7 +383,16 @@ void d64_drive_unmount(iec_drive_t *drive)
         close_all_channels(drive);
 
         // Write back BAM if dirty
-        if (drive->bam_dirty) {
+        if (drive->desc.type == IMAGE_TYPE_D81) {
+            if (drive->bam_dirty) {
+                write_sector(drive, D81_DIR_TRACK, 1, drive->bam);
+                drive->bam_dirty = false;
+            }
+            if (drive->bam2_dirty) {
+                write_sector(drive, D81_DIR_TRACK, 2, drive->bam2);
+                drive->bam2_dirty = false;
+            }
+        } else if (drive->bam_dirty) {
             write_sector(drive, DIR_TRACK, 0, drive->bam);
             drive->bam_dirty = false;
         }
@@ -405,6 +458,22 @@ static bool parse_image_file(iec_drive_t *drive)
         memset(drive->desc.error_info, 1, sizeof(drive->desc.error_info));
         drive->desc.has_error_info = false;
     }
+    // Check for D81 format by size
+    else if (size == D81_SIZE || size == D81_SIZE_ERR) {
+        drive->desc.type = IMAGE_TYPE_D81;
+        drive->desc.header_size = 0;
+        drive->desc.num_tracks = D81_NUM_TRACKS;
+
+        // Read error info if present
+        memset(drive->desc.error_info, 1, sizeof(drive->desc.error_info));
+        if (size == D81_SIZE_ERR) {
+            f_lseek(&drive->file, D81_SIZE);
+            f_read(&drive->file, drive->desc.error_info, NUM_SECTORS_D81, &br);
+            drive->desc.has_error_info = true;
+        } else {
+            drive->desc.has_error_info = false;
+        }
+    }
     // Check for D64 format by size
     else if (size == D64_SIZE_35 || size == D64_SIZE_35_ERR ||
              size == D64_SIZE_40 || size == D64_SIZE_40_ERR) {
@@ -432,18 +501,25 @@ static bool parse_image_file(iec_drive_t *drive)
             drive->desc.has_error_info = false;
         }
     } else {
-        printf("D64: Unknown file format (size=%lu)\n", (unsigned long)size);
+        MII_DEBUG_PRINTF("D64: Unknown file format (size=%lu)\n", (unsigned long)size);
         return false;
     }
 
-    // Read disk ID from BAM
-    uint32_t bam_offset = d64_offset_from_ts(&drive->desc, DIR_TRACK, 0);
+    // Read disk ID from BAM (use appropriate directory track)
+    int bam_track = (drive->desc.type == IMAGE_TYPE_D81) ? D81_DIR_TRACK : DIR_TRACK;
+    uint32_t bam_offset = d64_offset_from_ts(&drive->desc, bam_track, 0);
     uint8_t bam_buf[256];
     f_lseek(&drive->file, bam_offset);
     fr = f_read(&drive->file, bam_buf, 256, &br);
     if (fr == FR_OK && br == 256) {
-        drive->desc.id1 = bam_buf[BAM_DISK_ID];
-        drive->desc.id2 = bam_buf[BAM_DISK_ID + 1];
+        if (drive->desc.type == IMAGE_TYPE_D81) {
+            // D81: ID at offset 22-23 in header sector
+            drive->desc.id1 = bam_buf[22];
+            drive->desc.id2 = bam_buf[23];
+        } else {
+            drive->desc.id1 = bam_buf[BAM_DISK_ID];
+            drive->desc.id2 = bam_buf[BAM_DISK_ID + 1];
+        }
     }
 
     return true;
@@ -583,6 +659,25 @@ static void close_all_channels(iec_drive_t *drive)
  */
 static bool is_block_free(iec_drive_t *drive, int track, int sector)
 {
+    if (drive->desc.type == IMAGE_TYPE_D81) {
+        // D81: 6 bytes per track, BAM starts at offset 16 in BAM sectors
+        // Tracks 1-40 in BAM sector 1, tracks 41-80 in BAM sector 2
+        uint8_t *bam_sector;
+        int bam_track;
+        if (track <= 40) {
+            bam_sector = drive->bam;
+            bam_track = track;
+        } else {
+            bam_sector = drive->bam2;
+            bam_track = track - 40;
+        }
+        uint8_t *p = bam_sector + 16 + (bam_track - 1) * D81_BAM_ENTRY_SIZE;
+        int byte_idx = sector / 8 + 1;  // Skip free count byte
+        int bit = sector & 7;
+        return (p[byte_idx] & (1 << bit)) != 0;
+    }
+
+    // D64/X64
     uint8_t *p = drive->bam + BAM_BITMAP + (track - 1) * 4;
     int byte_idx = sector / 8 + 1;
     int bit = sector & 7;
@@ -594,6 +689,21 @@ static bool is_block_free(iec_drive_t *drive, int track, int sector)
  */
 static int num_free_blocks(iec_drive_t *drive, int track)
 {
+    if (drive->desc.type == IMAGE_TYPE_D81) {
+        // D81: free count is first byte of 6-byte entry
+        uint8_t *bam_sector;
+        int bam_track;
+        if (track <= 40) {
+            bam_sector = drive->bam;
+            bam_track = track;
+        } else {
+            bam_sector = drive->bam2;
+            bam_track = track - 40;
+        }
+        return bam_sector[16 + (bam_track - 1) * D81_BAM_ENTRY_SIZE];
+    }
+
+    // D64/X64
     return drive->bam[BAM_BITMAP + (track - 1) * 4];
 }
 
@@ -602,6 +712,39 @@ static int num_free_blocks(iec_drive_t *drive, int track)
  */
 static int alloc_block(iec_drive_t *drive, int track, int sector)
 {
+    if (drive->desc.type == IMAGE_TYPE_D81) {
+        if (track < 1 || track > D81_NUM_TRACKS || sector < 0 || sector >= D81_SECTORS_PER_TRACK) {
+            return ERR_ILLEGALTS;
+        }
+
+        uint8_t *bam_sector;
+        int bam_track;
+        bool *dirty_flag;
+        if (track <= 40) {
+            bam_sector = drive->bam;
+            bam_track = track;
+            dirty_flag = &drive->bam_dirty;
+        } else {
+            bam_sector = drive->bam2;
+            bam_track = track - 40;
+            dirty_flag = &drive->bam2_dirty;
+        }
+
+        uint8_t *p = bam_sector + 16 + (bam_track - 1) * D81_BAM_ENTRY_SIZE;
+        int byte_idx = sector / 8 + 1;
+        int bit = sector & 7;
+
+        if (p[byte_idx] & (1 << bit)) {
+            // Block is free, allocate it
+            p[byte_idx] &= ~(1 << bit);
+            p[0]--;
+            *dirty_flag = true;
+            return ERR_OK;
+        }
+        return ERR_NOBLOCK;
+    }
+
+    // D64/X64
     if (track < 1 || track > 35 || sector < 0 || sector >= num_sectors[track]) {
         return ERR_ILLEGALTS;
     }
@@ -625,6 +768,38 @@ static int alloc_block(iec_drive_t *drive, int track, int sector)
  */
 static int free_block(iec_drive_t *drive, int track, int sector)
 {
+    if (drive->desc.type == IMAGE_TYPE_D81) {
+        if (track < 1 || track > D81_NUM_TRACKS || sector < 0 || sector >= D81_SECTORS_PER_TRACK) {
+            return ERR_ILLEGALTS;
+        }
+
+        uint8_t *bam_sector;
+        int bam_track;
+        bool *dirty_flag;
+        if (track <= 40) {
+            bam_sector = drive->bam;
+            bam_track = track;
+            dirty_flag = &drive->bam_dirty;
+        } else {
+            bam_sector = drive->bam2;
+            bam_track = track - 40;
+            dirty_flag = &drive->bam2_dirty;
+        }
+
+        uint8_t *p = bam_sector + 16 + (bam_track - 1) * D81_BAM_ENTRY_SIZE;
+        int byte_idx = sector / 8 + 1;
+        int bit = sector & 7;
+
+        if (!(p[byte_idx] & (1 << bit))) {
+            // Block is allocated, free it
+            p[byte_idx] |= (1 << bit);
+            p[0]++;
+            *dirty_flag = true;
+        }
+        return ERR_OK;
+    }
+
+    // D64/X64
     if (track < 1 || track > 35 || sector < 0 || sector >= num_sectors[track]) {
         return ERR_ILLEGALTS;
     }
@@ -667,21 +842,25 @@ static bool alloc_next_block(iec_drive_t *drive, int *track, int *sector, int in
     int t = *track;
     int s = *sector;
 
+    // Get disk geometry based on type
+    int dir_track = (drive->desc.type == IMAGE_TYPE_D81) ? D81_DIR_TRACK : DIR_TRACK;
+    int max_track = (drive->desc.type == IMAGE_TYPE_D81) ? D81_NUM_TRACKS : 35;
+
     // Find track with free blocks
     while (num_free_blocks(drive, t) == 0) {
-        if (t == DIR_TRACK) {
+        if (t == dir_track) {
             // Directory doesn't grow to other tracks
             d64_drive_set_error(drive, ERR_DISKFULL, 0, 0);
             return false;
-        } else if (t > DIR_TRACK) {
+        } else if (t > dir_track) {
             t++;
-            if (t > 35) {
+            if (t > max_track) {
                 if (side_changed) {
                     d64_drive_set_error(drive, ERR_DISKFULL, 0, 0);
                     return false;
                 }
                 side_changed = true;
-                t = DIR_TRACK - 1;
+                t = dir_track - 1;
                 s = 0;
             }
         } else {
@@ -692,14 +871,14 @@ static bool alloc_next_block(iec_drive_t *drive, int *track, int *sector, int in
                     return false;
                 }
                 side_changed = true;
-                t = DIR_TRACK + 1;
+                t = dir_track + 1;
                 s = 0;
             }
         }
     }
 
     // Find next free block on track
-    int num = num_sectors[t];
+    int num = (drive->desc.type == IMAGE_TYPE_D81) ? D81_SECTORS_PER_TRACK : num_sectors[t];
     s = s + interleave;
     if (s >= num) {
         s -= num;
@@ -751,15 +930,20 @@ static bool find_file(iec_drive_t *drive, const uint8_t *pattern, int pattern_le
     uint8_t *de = NULL;
     int num_dir_blocks = 0;
 
+    // Get directory parameters based on disk type
+    int first_dir_track = (drive->desc.type == IMAGE_TYPE_D81) ? D81_DIR_TRACK : DIR_TRACK;
+    int first_dir_sector = (drive->desc.type == IMAGE_TYPE_D81) ? 3 : 1;
+    int max_dir_sectors = (drive->desc.type == IMAGE_TYPE_D81) ? D81_SECTORS_PER_TRACK : num_sectors[DIR_TRACK];
+
     if (cont) {
         de = drive->dir + 2 + (*entry) * SIZEOF_DE;
     } else {
-        drive->dir[0] = DIR_TRACK;
-        drive->dir[1] = 1;
+        drive->dir[0] = first_dir_track;
+        drive->dir[1] = first_dir_sector;
         *entry = 8;
     }
 
-    while (num_dir_blocks < num_sectors[DIR_TRACK]) {
+    while (num_dir_blocks < max_dir_sectors) {
         (*entry)++;
         if (de) de += SIZEOF_DE;
 
@@ -809,8 +993,10 @@ static bool find_next_file(iec_drive_t *drive, const uint8_t *pattern, int patte
 static bool alloc_dir_entry(iec_drive_t *drive, int *track, int *sector, int *entry)
 {
     // Look for free entry in existing directory blocks
-    drive->dir[0] = DIR_TRACK;
-    drive->dir[1] = 1;
+    // D81: directory starts at track 40, sector 3
+    // D64: directory starts at track 18, sector 1
+    drive->dir[0] = (drive->desc.type == IMAGE_TYPE_D81) ? D81_DIR_TRACK : DIR_TRACK;
+    drive->dir[1] = (drive->desc.type == IMAGE_TYPE_D81) ? 3 : 1;
 
     while (drive->dir[0]) {
         if (!read_sector(drive, *track = drive->dir[0], *sector = drive->dir[1], drive->dir)) {
@@ -827,7 +1013,8 @@ static bool alloc_dir_entry(iec_drive_t *drive, int *track, int *sector, int *en
 
     // No free entry found, allocate new directory block
     int last_track = *track, last_sector = *sector;
-    if (!alloc_next_block(drive, track, sector, DIR_INTERLEAVE)) {
+    int dir_interleave = (drive->desc.type == IMAGE_TYPE_D81) ? D81_INTERLEAVE : DIR_INTERLEAVE;
+    if (!alloc_next_block(drive, track, sector, dir_interleave)) {
         return false;
     }
 
@@ -895,9 +1082,13 @@ static uint8_t create_file(iec_drive_t *drive, int channel, const uint8_t *name,
     uint8_t *de = drive->dir + 2 + drive->ch[channel].entry * SIZEOF_DE;
 
     // Allocate first data block
-    drive->ch[channel].track = DIR_TRACK - 1;
-    drive->ch[channel].sector = -DATA_INTERLEAVE;
-    if (!alloc_next_block(drive, &drive->ch[channel].track, &drive->ch[channel].sector, DATA_INTERLEAVE)) {
+    // D81: directory track is 40, interleave is 1
+    // D64: directory track is 18, interleave is 10
+    int dir_track_local = (drive->desc.type == IMAGE_TYPE_D81) ? D81_DIR_TRACK : DIR_TRACK;
+    int data_interleave = (drive->desc.type == IMAGE_TYPE_D81) ? D81_INTERLEAVE : DATA_INTERLEAVE;
+    drive->ch[channel].track = dir_track_local - 1;
+    drive->ch[channel].sector = -data_interleave;
+    if (!alloc_next_block(drive, &drive->ch[channel].track, &drive->ch[channel].sector, data_interleave)) {
         free_buffer(drive, buf);
         return ST_OK;
     }
@@ -971,8 +1162,17 @@ static uint8_t open_directory(iec_drive_t *drive, const uint8_t *pattern, int pa
     *p++ = 0x12;  // RVS ON
     *p++ = '"';
 
-    // Copy disk name from BAM
-    uint8_t *q = drive->bam + BAM_DISK_NAME;
+    // Copy disk name - location differs for D81 vs D64
+    uint8_t *q;
+    uint8_t header_buf[256];
+    if (drive->desc.type == IMAGE_TYPE_D81) {
+        // D81: disk name is in header sector (track 40, sector 0) at offset 4
+        read_sector(drive, D81_DIR_TRACK, 0, header_buf);
+        q = header_buf + 4;
+    } else {
+        // D64: disk name is in BAM
+        q = drive->bam + BAM_DISK_NAME;
+    }
     for (int i = 0; i < 23; i++) {
         int c = *q++;
         if (c == 0xa0) {
@@ -986,11 +1186,14 @@ static uint8_t open_directory(iec_drive_t *drive, const uint8_t *pattern, int pa
 
     // Scan directory blocks
     uint8_t dir_buf[256];
-    dir_buf[0] = DIR_TRACK;
-    dir_buf[1] = 1;
+    int first_dir_track = (drive->desc.type == IMAGE_TYPE_D81) ? D81_DIR_TRACK : DIR_TRACK;
+    int first_dir_sector = (drive->desc.type == IMAGE_TYPE_D81) ? 3 : 1;
+    int max_dir_sectors = (drive->desc.type == IMAGE_TYPE_D81) ? D81_SECTORS_PER_TRACK : num_sectors[DIR_TRACK];
+    dir_buf[0] = first_dir_track;
+    dir_buf[1] = first_dir_sector;
 
     int num_dir_blocks = 0;
-    while (dir_buf[0] && num_dir_blocks < num_sectors[DIR_TRACK]) {
+    while (dir_buf[0] && num_dir_blocks < max_dir_sectors) {
         if (!read_sector(drive, dir_buf[0], dir_buf[1], dir_buf)) {
             break;
         }
@@ -1058,8 +1261,10 @@ static uint8_t open_directory(iec_drive_t *drive, const uint8_t *pattern, int pa
 
     // Final line: free blocks
     int n = 0;
-    for (int track = 1; track <= 35; track++) {
-        if (track != DIR_TRACK) {
+    int max_track = (drive->desc.type == IMAGE_TYPE_D81) ? D81_NUM_TRACKS : 35;
+    int dir_track_num = (drive->desc.type == IMAGE_TYPE_D81) ? D81_DIR_TRACK : DIR_TRACK;
+    for (int track = 1; track <= max_track; track++) {
+        if (track != dir_track_num) {
             n += num_free_blocks(drive, track);
         }
     }
@@ -1296,7 +1501,9 @@ uint8_t d64_drive_open(iec_drive_t *drive, int channel, const uint8_t *name, int
 
     if (name[0] == '$') {
         if (channel) {
-            return open_file_ts(drive, channel, DIR_TRACK, 0);
+            // Open raw directory track/sector
+            int dir_track_raw = (drive->desc.type == IMAGE_TYPE_D81) ? D81_DIR_TRACK : DIR_TRACK;
+            return open_file_ts(drive, channel, dir_track_raw, 0);
         } else {
             return open_directory(drive, name + 1, name_len - 1);
         }
@@ -1482,7 +1689,8 @@ uint8_t d64_drive_write(iec_drive_t *drive, int channel, uint8_t byte, bool eoi)
             if (drive->ch[channel].buf_len >= 256) {
                 int track = drive->ch[channel].track;
                 int sector = drive->ch[channel].sector;
-                if (!alloc_next_block(drive, &track, &sector, DATA_INTERLEAVE)) {
+                int file_interleave = (drive->desc.type == IMAGE_TYPE_D81) ? D81_INTERLEAVE : DATA_INTERLEAVE;
+                if (!alloc_next_block(drive, &track, &sector, file_interleave)) {
                     return ST_TIMEOUT;
                 }
                 drive->ch[channel].num_blocks++;
@@ -1534,11 +1742,24 @@ void d64_execute_cmd(iec_drive_t *drive, const uint8_t *cmd, int cmd_len)
     switch (cmd[0]) {
         case 'I':  // Initialize
             close_all_channels(drive);
-            if (drive->bam_dirty) {
-                write_sector(drive, DIR_TRACK, 0, drive->bam);
-                drive->bam_dirty = false;
+            if (drive->desc.type == IMAGE_TYPE_D81) {
+                if (drive->bam_dirty) {
+                    write_sector(drive, D81_DIR_TRACK, 1, drive->bam);
+                    drive->bam_dirty = false;
+                }
+                if (drive->bam2_dirty) {
+                    write_sector(drive, D81_DIR_TRACK, 2, drive->bam2);
+                    drive->bam2_dirty = false;
+                }
+                read_sector(drive, D81_DIR_TRACK, 1, drive->bam);
+                read_sector(drive, D81_DIR_TRACK, 2, drive->bam2);
+            } else {
+                if (drive->bam_dirty) {
+                    write_sector(drive, DIR_TRACK, 0, drive->bam);
+                    drive->bam_dirty = false;
+                }
+                read_sector(drive, DIR_TRACK, 0, drive->bam);
             }
-            read_sector(drive, DIR_TRACK, 0, drive->bam);
             break;
 
         case 'U':  // User commands
@@ -1625,6 +1846,11 @@ bool d64_is_disk_image(const char *path, const uint8_t *header, uint32_t size)
 {
     // Check for X64
     if (memcmp(header, "C\x15\x41\x64\x01\x02", 6) == 0) {
+        return true;
+    }
+
+    // Check for D81 by size
+    if (size == D81_SIZE || size == D81_SIZE_ERR) {
         return true;
     }
 

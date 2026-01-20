@@ -25,6 +25,7 @@
 // Number of sectors in disk images
 #define NUM_SECTORS_35  683     // 35-track image
 #define NUM_SECTORS_40  768     // 40-track image
+#define NUM_SECTORS_D81 3200    // D81 image (80 tracks * 40 sectors)
 
 // D64 image sizes
 #define D64_SIZE_35         (NUM_SECTORS_35 * 256)      // 174848
@@ -32,7 +33,18 @@
 #define D64_SIZE_40         (NUM_SECTORS_40 * 256)      // 196608
 #define D64_SIZE_40_ERR     (NUM_SECTORS_40 * 257)      // 197376
 
-// Directory track
+// D81 image sizes
+#define D81_SIZE            (NUM_SECTORS_D81 * 256)     // 819200
+#define D81_SIZE_ERR        (NUM_SECTORS_D81 * 256 + NUM_SECTORS_D81) // 822400
+
+// D81 constants
+#define D81_SECTORS_PER_TRACK  40
+#define D81_NUM_TRACKS         80
+#define D81_DIR_TRACK          40
+#define D81_INTERLEAVE         1
+#define D81_BAM_ENTRY_SIZE     6    // 1 free count + 5 bytes for 40-bit bitmap
+
+// Directory track (D64)
 #define DIR_TRACK   18
 
 // Maximum number of channels
@@ -44,7 +56,8 @@
 // Disk image types
 typedef enum {
     IMAGE_TYPE_D64 = 0,
-    IMAGE_TYPE_X64 = 1
+    IMAGE_TYPE_X64 = 1,
+    IMAGE_TYPE_D81 = 2
 } image_type_t;
 
 /*
@@ -97,10 +110,10 @@ typedef struct {
  */
 typedef struct {
     image_type_t type;      // Image type
-    int header_size;        // Size of file header (64 for X64, 0 for D64)
-    int num_tracks;         // Number of tracks (35 or 40)
+    int header_size;        // Size of file header (64 for X64, 0 for D64/D81)
+    int num_tracks;         // Number of tracks (35, 40, or 80 for D81)
     uint8_t id1, id2;       // Block header ID
-    uint8_t error_info[NUM_SECTORS_40];  // Sector error info
+    uint8_t error_info[NUM_SECTORS_D81];  // Sector error info (sized for largest format)
     bool has_error_info;    // Flag: error info present
 } image_file_desc_t;
 
@@ -135,6 +148,8 @@ struct iec_drive {
     uint8_t dir[258];       // Directory block buffer (256 + 2 for safety)
     uint8_t *bam;           // Pointer to BAM in RAM (buffer 4, upper 256 bytes)
     bool bam_dirty;         // BAM modified flag
+    uint8_t bam2[256];      // Second BAM sector for D81 (tracks 41-80)
+    bool bam2_dirty;        // Second BAM modified flag (D81 only)
 
     // Channel descriptors
     channel_desc_t ch[MAX_CHANNELS];

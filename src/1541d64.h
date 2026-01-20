@@ -34,11 +34,13 @@
 // Constants
 constexpr unsigned NUM_SECTORS_35 = 683;	// Number of sectors in a 35-track image
 constexpr unsigned NUM_SECTORS_40 = 768;	// Number of sectors in a 40-track image
+constexpr unsigned NUM_SECTORS_D81 = 3200;	// Number of sectors in a D81 image (80 tracks * 40 sectors)
 
 // Disk image types
 enum {
 	TYPE_D64,			// D64 file
-	TYPE_X64			// x64 file
+	TYPE_X64,			// x64 file
+	TYPE_D81			// D81 file (1581 disk image)
 };
 
 // Channel descriptor
@@ -62,7 +64,7 @@ struct image_file_desc {
 	int header_size;		// Size of file header
 	int num_tracks;			// Number of tracks
 	uint8_t id1, id2;		// Block header ID (as opposed to BAM ID)
-	uint8_t error_info[NUM_SECTORS_40]; // Sector error information (1 byte/sector)
+	uint8_t error_info[NUM_SECTORS_D81]; // Sector error information (1 byte/sector), sized for largest format
 	bool has_error_info;	// Flag: error info present in file
 };
 
@@ -133,9 +135,16 @@ private:
 	uint8_t dir[258];		// Buffer for directory blocks
 	uint8_t *bam;			// Pointer to BAM in 1541 RAM (buffer 4, upper 256 bytes)
 	bool bam_dirty;			// Flag: BAM modified, needs to be written back
+	uint8_t bam2[256];		// Second BAM sector for D81 (tracks 41-80)
+	bool bam2_dirty;		// Flag: second BAM modified (D81 only)
 
 	channel_desc ch[18];	// Descriptors for channels 0..17 (16 = internal read, 17 = internal write)
 	bool buf_free[4];		// Flags: buffer 0..3 free?
+
+	// Helper methods
+	bool is_d81() const { return desc.type == TYPE_D81; }
+	int dir_track() const { return is_d81() ? 40 : 18; }
+	int first_dir_sector() const { return is_d81() ? 3 : 1; }
 };
 
 
