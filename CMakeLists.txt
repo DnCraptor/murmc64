@@ -43,6 +43,9 @@ option(DEBUG_LOGS_ENABLED "Enable verbose debug logging" OFF)
 # Use Frodo Lite (line-based) instead of Frodo SC (cycle-accurate) for better performance
 option(FRODO_LITE "Use Frodo Lite (line-based emulation)" ON)
 
+# Firmware version string (set by release.sh or manually)
+set(FIRMWARE_VERSION "v1.00" CACHE STRING "Firmware version string for display")
+
 message(STATUS "murmfrodo4 - Commodore 64 Emulator (Frodo4) for RP2350")
 message(STATUS "Board: ${BOARD_VARIANT}, CPU: ${CPU_SPEED} MHz, PSRAM: ${PSRAM_SPEED} MHz, Voltage: ${CPU_VOLTAGE}")
 message(STATUS "I2S Audio: DATA=${I2S_DATA_PIN}, CLK_BASE=${I2S_CLOCK_PIN_BASE}")
@@ -138,6 +141,7 @@ target_compile_definitions(murmfrodo4 PRIVATE
     CPU_CLOCK_MHZ=${CPU_SPEED}
     CPU_VOLTAGE=${CPU_VOLTAGE}
     PSRAM_MAX_FREQ_MHZ=${PSRAM_SPEED}
+    FIRMWARE_VERSION="${FIRMWARE_VERSION}"
     # RP2350 platform flag
     FRODO_RP2350=1
     # Disable SDL and GTK

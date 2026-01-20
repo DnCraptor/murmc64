@@ -1,7 +1,11 @@
 /*
- * startscreen.c - Welcome/start screen for murmfrodo4
+ * startscreen.c - Demoscene-style welcome screen for murmfrodo4
  *
- * Displays system information on startup before emulation begins.
+ * Features:
+ * - 250-color gradient palette
+ * - Plasma effect background
+ * - Copper/raster bars
+ * - Smooth color transitions
  */
 
 #include <stdio.h>
@@ -12,28 +16,55 @@
 
 // HDMI driver functions
 extern uint8_t* graphics_get_buffer(void);
+extern void graphics_set_palette(uint8_t i, uint32_t color888);
+extern void graphics_request_buffer_swap(uint8_t *buffer);
+
+// Double buffering - access main framebuffers
+extern uint8_t *framebuffers[2];
 
 // Screen dimensions
 #define SCREEN_WIDTH   FB_WIDTH
 #define SCREEN_HEIGHT  FB_HEIGHT
 
 // UI dimensions
-#define UI_PADDING     6
 #define CHAR_WIDTH     6
 #define CHAR_HEIGHT    8
-#define HEADER_HEIGHT  12
 #define LINE_HEIGHT    10
 
-// Colors (C64 palette indices)
-#define COLOR_BG        6   // Blue (C64 blue background)
-#define COLOR_BORDER    14  // Light Blue
-#define COLOR_TEXT      1   // White
-#define COLOR_HEADER_BG 14  // Light Blue (header background)
-#define COLOR_HEADER_FG 0   // Black (header foreground)
-#define COLOR_GREEN     5   // Green (for version/status)
-#define COLOR_YELLOW    7   // Yellow
+// Palette ranges for demoscene effects (~250 colors total)
+#define PALETTE_PLASMA_START  16   // Start after C64 colors (0-15)
+#define PALETTE_PLASMA_COUNT  218  // Plasma gradient (indices 16-233)
+#define PALETTE_COPPER_START  234  // Copper bar colors (indices 234-249)
+#define PALETTE_COPPER_COUNT  16   // Number of copper colors
 
-// Compact 6x8 bitmap font (same as disk_ui.c)
+// Text colors (using reserved entries 250-255)
+#define COLOR_TEXT_WHITE   255
+#define COLOR_TEXT_SHADOW  250
+#define COLOR_TEXT_CYAN    251
+#define COLOR_TEXT_YELLOW  252
+#define COLOR_TEXT_GREEN   253
+
+// Sine table for plasma effect (256 entries, values 0-255)
+static const uint8_t sine_table[256] = {
+    128,131,134,137,140,143,146,149,152,155,158,162,165,167,170,173,
+    176,179,182,185,188,190,193,196,198,201,203,206,208,211,213,215,
+    218,220,222,224,226,228,230,232,234,235,237,238,240,241,243,244,
+    245,246,248,249,250,250,251,252,253,253,254,254,254,255,255,255,
+    255,255,255,255,254,254,254,253,253,252,251,250,250,249,248,246,
+    245,244,243,241,240,238,237,235,234,232,230,228,226,224,222,220,
+    218,215,213,211,208,206,203,201,198,196,193,190,188,185,182,179,
+    176,173,170,167,165,162,158,155,152,149,146,143,140,137,134,131,
+    128,124,121,118,115,112,109,106,103,100,97,93,90,88,85,82,
+    79,76,73,70,67,65,62,59,57,54,52,49,47,44,42,40,
+    37,35,33,31,29,27,25,23,21,20,18,17,15,14,12,11,
+    10,9,7,6,5,5,4,3,2,2,1,1,1,0,0,0,
+    0,0,0,0,1,1,1,2,2,3,4,5,5,6,7,9,
+    10,11,12,14,15,17,18,20,21,23,25,27,29,31,33,35,
+    37,40,42,44,47,49,52,54,57,59,62,65,67,70,73,76,
+    79,82,85,88,90,93,97,100,103,106,109,112,115,118,121,124
+};
+
+// Compact 6x8 bitmap font
 static const uint8_t font_6x8[][8] = {
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}, // 32 Space
     {0x20,0x20,0x20,0x20,0x20,0x00,0x20,0x00}, // 33 !
@@ -132,24 +163,147 @@ static const uint8_t font_6x8[][8] = {
     {0x00,0x00,0x40,0xA8,0x10,0x00,0x00,0x00}, // 126 ~
 };
 
-// Draw a filled rectangle
-static void draw_rect(uint8_t *fb, int x, int y, int w, int h, uint8_t color) {
-    for (int dy = 0; dy < h; dy++) {
-        if (y + dy < 0 || y + dy >= SCREEN_HEIGHT) continue;
-        for (int dx = 0; dx < w; dx++) {
-            if (x + dx < 0 || x + dx >= SCREEN_WIDTH) continue;
-            fb[(y + dy) * SCREEN_WIDTH + (x + dx)] = color;
+// Helper: interpolate between two colors
+static uint32_t lerp_color(uint32_t c1, uint32_t c2, uint8_t t) {
+    uint8_t r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
+    uint8_t r2 = (c2 >> 16) & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = c2 & 0xFF;
+    uint8_t r = r1 + ((r2 - r1) * t / 255);
+    uint8_t g = g1 + ((g2 - g1) * t / 255);
+    uint8_t b = b1 + ((b2 - b1) * t / 255);
+    return (r << 16) | (g << 8) | b;
+}
+
+// Set up demoscene palette with smooth gradients
+static void setup_demoscene_palette(void) {
+    // Gradient keypoints for plasma effect (dark blue -> cyan -> white -> magenta -> dark purple)
+    static const uint32_t gradient[] = {
+        0x000020,  // Very dark blue
+        0x000060,  // Dark blue
+        0x0000C0,  // Blue
+        0x0040FF,  // Bright blue
+        0x00C0FF,  // Cyan-blue
+        0x00FFFF,  // Cyan
+        0x80FFFF,  // Light cyan
+        0xFFFFFF,  // White
+        0xFF80FF,  // Light magenta
+        0xFF00FF,  // Magenta
+        0xC000C0,  // Purple
+        0x600080,  // Dark purple
+        0x200040,  // Very dark purple
+        0x000020,  // Back to dark blue (for seamless loop)
+    };
+    const int num_keys = sizeof(gradient) / sizeof(gradient[0]);
+
+    // Generate smooth gradient across plasma palette range
+    for (int i = 0; i < PALETTE_PLASMA_COUNT; i++) {
+        float pos = (float)i / PALETTE_PLASMA_COUNT * (num_keys - 1);
+        int idx = (int)pos;
+        uint8_t t = (uint8_t)((pos - idx) * 255);
+        if (idx >= num_keys - 1) idx = num_keys - 2;
+        uint32_t color = lerp_color(gradient[idx], gradient[idx + 1], t);
+        graphics_set_palette(PALETTE_PLASMA_START + i, color);
+    }
+
+    // Copper bar colors: warm gradient (dark red -> orange -> yellow -> white)
+    static const uint32_t copper_gradient[] = {
+        0x200000,  // Very dark red
+        0x600000,  // Dark red
+        0xC00000,  // Red
+        0xFF2000,  // Orange-red
+        0xFF6000,  // Orange
+        0xFFA000,  // Light orange
+        0xFFC040,  // Yellow-orange
+        0xFFE080,  // Light yellow
+        0xFFF0C0,  // Pale yellow
+        0xFFFFFF,  // White (center)
+        0xFFF0C0,  // Pale yellow
+        0xFFE080,  // Light yellow
+        0xFFC040,  // Yellow-orange
+        0xFFA000,  // Light orange
+        0xFF6000,  // Orange
+        0xC00000,  // Red
+    };
+    for (int i = 0; i < PALETTE_COPPER_COUNT; i++) {
+        graphics_set_palette(PALETTE_COPPER_START + i, copper_gradient[i]);
+    }
+
+    // Special colors for text (indices 250-255)
+    graphics_set_palette(COLOR_TEXT_SHADOW, 0x101030);  // 250
+    graphics_set_palette(COLOR_TEXT_CYAN, 0x00FFFF);    // 251
+    graphics_set_palette(COLOR_TEXT_YELLOW, 0xFFFF00);  // 252
+    graphics_set_palette(COLOR_TEXT_GREEN, 0x00FF00);   // 253
+    graphics_set_palette(254, 0xC0C0C0);                // Light gray
+    graphics_set_palette(COLOR_TEXT_WHITE, 0xFFFFFF);   // 255
+}
+
+// Draw plasma background
+static void draw_plasma(uint8_t *fb, uint8_t time_offset) {
+    for (int y = 0; y < SCREEN_HEIGHT; y++) {
+        for (int x = 0; x < SCREEN_WIDTH; x++) {
+            // Smooth plasma formula using multiple overlapping sine waves
+            // Scale x and y to create seamless tiling pattern
+            uint8_t v1 = sine_table[(x * 2 + time_offset) & 0xFF];
+            uint8_t v2 = sine_table[(y * 2 + time_offset) & 0xFF];
+            uint8_t v3 = sine_table[((x + y) + time_offset * 2) & 0xFF];
+            uint8_t v4 = sine_table[((x - y + 256) + time_offset) & 0xFF];
+
+            // Add a slow-moving radial component for more variation
+            int cx = x - SCREEN_WIDTH / 2;
+            int cy = y - SCREEN_HEIGHT / 2;
+            uint8_t v5 = sine_table[((cx * cx + cy * cy) / 128 + time_offset * 3) & 0xFF];
+
+            // Combine waves with equal weight
+            uint16_t combined = v1 + v2 + v3 + v4 + v5;
+
+            // Map to palette range with clamping
+            int plasma_idx = (combined * PALETTE_PLASMA_COUNT) / (256 * 5);
+            if (plasma_idx >= PALETTE_PLASMA_COUNT) plasma_idx = PALETTE_PLASMA_COUNT - 1;
+
+            fb[y * SCREEN_WIDTH + x] = PALETTE_PLASMA_START + plasma_idx;
         }
     }
 }
 
-// Draw a character using the 6x8 bitmap font
-static void draw_char(uint8_t *fb, int x, int y, char c, uint8_t color) {
+// Draw horizontal copper bars (classic Amiga effect)
+static void draw_copper_bars(uint8_t *fb, int bar_y, int bar_height) {
+    if (bar_y < 0 || bar_y >= SCREEN_HEIGHT) return;
+
+    for (int i = 0; i < bar_height && (bar_y + i) < SCREEN_HEIGHT; i++) {
+        int y = bar_y + i;
+        // Calculate color index based on position in bar (peak at center)
+        int dist_from_center = (i < bar_height / 2) ? i : (bar_height - 1 - i);
+        int color_idx = dist_from_center * (PALETTE_COPPER_COUNT - 1) / (bar_height / 2);
+        if (color_idx >= PALETTE_COPPER_COUNT) color_idx = PALETTE_COPPER_COUNT - 1;
+
+        uint8_t color = PALETTE_COPPER_START + color_idx;
+
+        // Draw full width scanline
+        for (int x = 0; x < SCREEN_WIDTH; x++) {
+            fb[y * SCREEN_WIDTH + x] = color;
+        }
+    }
+}
+
+// Draw a character with drop shadow
+static void draw_char_shadow(uint8_t *fb, int x, int y, char c, uint8_t color) {
     int idx = (unsigned char)c - 32;
     if (idx < 0 || idx > 94) return;
 
     const uint8_t *glyph = font_6x8[idx];
 
+    // Draw shadow first (offset by 1,1)
+    for (int row = 0; row < 8; row++) {
+        if (y + row + 1 < 0 || y + row + 1 >= SCREEN_HEIGHT) continue;
+        uint8_t bits = glyph[row];
+        for (int col = 0; col < 6; col++) {
+            if (x + col + 1 < 0 || x + col + 1 >= SCREEN_WIDTH) continue;
+            if (bits & (0x80 >> col)) {
+                fb[(y + row + 1) * SCREEN_WIDTH + (x + col + 1)] = COLOR_TEXT_SHADOW;
+            }
+        }
+    }
+
+    // Draw main character
     for (int row = 0; row < 8; row++) {
         if (y + row < 0 || y + row >= SCREEN_HEIGHT) continue;
         uint8_t bits = glyph[row];
@@ -162,10 +316,10 @@ static void draw_char(uint8_t *fb, int x, int y, char c, uint8_t color) {
     }
 }
 
-// Draw a string
-static void draw_string(uint8_t *fb, int x, int y, const char *str, uint8_t color) {
+// Draw string with drop shadow
+static void draw_string_shadow(uint8_t *fb, int x, int y, const char *str, uint8_t color) {
     while (*str) {
-        draw_char(fb, x, y, *str, color);
+        draw_char_shadow(fb, x, y, *str, color);
         x += CHAR_WIDTH;
         str++;
     }
@@ -176,88 +330,157 @@ static int string_width(const char *str) {
     return strlen(str) * CHAR_WIDTH;
 }
 
-// Draw a centered string
-static void draw_centered_string(uint8_t *fb, int y, const char *str, uint8_t color) {
+// Draw centered string with shadow
+static void draw_centered_shadow(uint8_t *fb, int y, const char *str, uint8_t color) {
     int w = string_width(str);
     int x = (SCREEN_WIDTH - w) / 2;
-    draw_string(fb, x, y, str, color);
+    draw_string_shadow(fb, x, y, str, color);
 }
 
-// Draw border
-static void draw_border(uint8_t *fb, int x, int y, int w, int h) {
-    draw_rect(fb, x, y, w, 1, COLOR_BORDER);
-    draw_rect(fb, x, y + h - 1, w, 1, COLOR_BORDER);
-    draw_rect(fb, x, y, 1, h, COLOR_BORDER);
-    draw_rect(fb, x + w - 1, y, 1, h, COLOR_BORDER);
+// Draw a semi-transparent box (darkens background)
+static void draw_dark_box(uint8_t *fb, int x, int y, int w, int h) {
+    for (int dy = 0; dy < h; dy++) {
+        if (y + dy < 0 || y + dy >= SCREEN_HEIGHT) continue;
+        for (int dx = 0; dx < w; dx++) {
+            if (x + dx < 0 || x + dx >= SCREEN_WIDTH) continue;
+            int idx = (y + dy) * SCREEN_WIDTH + (x + dx);
+            // Darken by reducing to lower palette entries
+            uint8_t current = fb[idx];
+            if (current >= PALETTE_PLASMA_START) {
+                // Shift toward darker end of plasma palette
+                int new_val = PALETTE_PLASMA_START + (current - PALETTE_PLASMA_START) / 3;
+                fb[idx] = new_val;
+            }
+        }
+    }
 }
 
-// Draw header bar (inverted colors)
-static void draw_header(uint8_t *fb, int x, int y, int w, const char *title) {
-    draw_rect(fb, x, y, w, HEADER_HEIGHT, COLOR_HEADER_BG);
-    int title_len = strlen(title);
-    int title_x = x + (w - title_len * CHAR_WIDTH) / 2;
-    int title_y = y + (HEADER_HEIGHT - CHAR_HEIGHT) / 2;
-    draw_string(fb, title_x, title_y, title, COLOR_HEADER_FG);
+// Draw a glowing border around a box
+static void draw_glow_border(uint8_t *fb, int x, int y, int w, int h, uint8_t base_color) {
+    // Draw outer glow (darker)
+    for (int i = -2; i <= w + 1; i++) {
+        if (x + i >= 0 && x + i < SCREEN_WIDTH) {
+            if (y - 2 >= 0) fb[(y - 2) * SCREEN_WIDTH + x + i] = base_color;
+            if (y + h + 1 < SCREEN_HEIGHT) fb[(y + h + 1) * SCREEN_WIDTH + x + i] = base_color;
+        }
+    }
+    for (int i = -1; i <= h; i++) {
+        if (y + i >= 0 && y + i < SCREEN_HEIGHT) {
+            if (x - 2 >= 0) fb[(y + i) * SCREEN_WIDTH + x - 2] = base_color;
+            if (x + w + 1 < SCREEN_WIDTH) fb[(y + i) * SCREEN_WIDTH + x + w + 1] = base_color;
+        }
+    }
+
+    // Draw bright inner border
+    uint8_t bright = base_color + 40;
+    if (bright > PALETTE_PLASMA_START + PALETTE_PLASMA_COUNT - 1)
+        bright = PALETTE_PLASMA_START + PALETTE_PLASMA_COUNT - 1;
+
+    for (int i = -1; i <= w; i++) {
+        if (x + i >= 0 && x + i < SCREEN_WIDTH) {
+            if (y - 1 >= 0) fb[(y - 1) * SCREEN_WIDTH + x + i] = bright;
+            if (y + h < SCREEN_HEIGHT) fb[(y + h) * SCREEN_WIDTH + x + i] = bright;
+        }
+    }
+    for (int i = 0; i < h; i++) {
+        if (y + i >= 0 && y + i < SCREEN_HEIGHT) {
+            if (x - 1 >= 0) fb[(y + i) * SCREEN_WIDTH + x - 1] = bright;
+            if (x + w < SCREEN_WIDTH) fb[(y + i) * SCREEN_WIDTH + x + w] = bright;
+        }
+    }
 }
 
 int startscreen_show(startscreen_info_t *info) {
-    // Get framebuffer from HDMI driver
-    uint8_t *buffer = graphics_get_buffer();
-    if (!buffer) return -1;
+    // Check framebuffers are available for double buffering
+    if (!framebuffers[0] || !framebuffers[1]) return -1;
 
-    // Clear to C64 blue background
-    memset(buffer, COLOR_BG, SCREEN_WIDTH * SCREEN_HEIGHT);
+    // Setup demoscene color palette
+    setup_demoscene_palette();
 
-    // Window dimensions (centered)
-    const int win_w = 220;
-    const int win_h = 150;
-    const int win_x = (SCREEN_WIDTH - win_w) / 2;
-    const int win_y = (SCREEN_HEIGHT - win_h) / 2;
+    // Animate the plasma for visual effect
+    const int num_frames = 120;  // ~4 seconds at 30fps
+    const int frame_delay = 33;  // ~30fps for smooth animation
 
-    // Draw window background and border
-    draw_rect(buffer, win_x, win_y, win_w, win_h, COLOR_BG);
-    draw_border(buffer, win_x, win_y, win_w, win_h);
+    int back_buffer_idx = 1;  // Start drawing to buffer 1
 
-    // Draw header with title
-    draw_header(buffer, win_x + 1, win_y + 1, win_w - 2, info->title);
+    for (int frame = 0; frame < num_frames; frame++) {
+        // Get back buffer to draw to
+        uint8_t *buffer = framebuffers[back_buffer_idx];
 
-    // Content area starts after header
-    int content_y = win_y + HEADER_HEIGHT + UI_PADDING + 4;
+        // Draw animated plasma background
+        draw_plasma(buffer, frame * 4);
 
-    // Subtitle
-    draw_centered_string(buffer, content_y, info->subtitle, COLOR_TEXT);
-    content_y += LINE_HEIGHT + 4;
+        // Add copper bars at different positions
+        int bar1_y = 20 + (sine_table[(frame * 3) & 0xFF] * 30 / 255);
+        int bar2_y = SCREEN_HEIGHT - 50 - (sine_table[(frame * 3 + 128) & 0xFF] * 30 / 255);
+        draw_copper_bars(buffer, bar1_y, 12);
+        draw_copper_bars(buffer, bar2_y, 12);
 
-    // Version (in green)
-    draw_centered_string(buffer, content_y, info->version, COLOR_GREEN);
-    content_y += LINE_HEIGHT + 10;
+        // Info box dimensions
+        const int box_w = 240;
+        const int box_h = 140;
+        const int box_x = (SCREEN_WIDTH - box_w) / 2;
+        const int box_y = (SCREEN_HEIGHT - box_h) / 2;
 
-    // System information
-    char line[48];
+        // Draw darkened info box area
+        draw_dark_box(buffer, box_x, box_y, box_w, box_h);
 
-    snprintf(line, sizeof(line), "CPU: %lu MHz", (unsigned long)info->cpu_mhz);
-    draw_centered_string(buffer, content_y, line, COLOR_TEXT);
-    content_y += LINE_HEIGHT + 2;
+        // Draw glowing border
+        draw_glow_border(buffer, box_x, box_y, box_w, box_h, PALETTE_PLASMA_START + 100);
 
-    snprintf(line, sizeof(line), "PSRAM: %lu MHz", (unsigned long)info->psram_mhz);
-    draw_centered_string(buffer, content_y, line, COLOR_TEXT);
-    content_y += LINE_HEIGHT + 2;
+        // Text content
+        int text_y = box_y + 12;
 
-    snprintf(line, sizeof(line), "Board: M%d", info->board_variant);
-    draw_centered_string(buffer, content_y, line, COLOR_TEXT);
-    content_y += LINE_HEIGHT + 10;
+        // Title (large, centered)
+        draw_centered_shadow(buffer, text_y, info->title, COLOR_TEXT_WHITE);
+        text_y += LINE_HEIGHT + 4;
 
-    // Copyright
-    draw_centered_string(buffer, content_y, "By Mikhail Matveev", COLOR_TEXT);
-    content_y += LINE_HEIGHT;
-    draw_centered_string(buffer, content_y, "rh1.tech", COLOR_TEXT);
+        // Subtitle
+        draw_centered_shadow(buffer, text_y, info->subtitle, COLOR_TEXT_CYAN);
+        text_y += LINE_HEIGHT + 2;
 
-    // "Starting..." status at bottom (in yellow)
-    content_y = win_y + win_h - LINE_HEIGHT - 6;
-    draw_centered_string(buffer, content_y, "Starting...", COLOR_YELLOW);
+        // Version (green)
+        draw_centered_shadow(buffer, text_y, info->version, COLOR_TEXT_GREEN);
+        text_y += LINE_HEIGHT + 12;
 
-    // Show for 6 seconds
-    sleep_ms(6000);
+        // System info
+        char line[48];
+
+        snprintf(line, sizeof(line), "CPU: %lu MHz", (unsigned long)info->cpu_mhz);
+        draw_centered_shadow(buffer, text_y, line, COLOR_TEXT_WHITE);
+        text_y += LINE_HEIGHT + 2;
+
+        snprintf(line, sizeof(line), "PSRAM: %lu MHz", (unsigned long)info->psram_mhz);
+        draw_centered_shadow(buffer, text_y, line, COLOR_TEXT_WHITE);
+        text_y += LINE_HEIGHT + 2;
+
+        snprintf(line, sizeof(line), "Board: M%d", info->board_variant);
+        draw_centered_shadow(buffer, text_y, line, COLOR_TEXT_WHITE);
+        text_y += LINE_HEIGHT + 10;
+
+        // Credits
+        draw_centered_shadow(buffer, text_y, "By Mikhail Matveev", COLOR_TEXT_CYAN);
+        text_y += LINE_HEIGHT;
+        draw_centered_shadow(buffer, text_y, "rh1.tech", COLOR_TEXT_CYAN);
+
+        // Starting message at bottom (blinking on later frames, green)
+        if (frame > 60 || (frame / 8) % 2 == 0) {
+            text_y = box_y + box_h - 16;
+            draw_centered_shadow(buffer, text_y, "Starting...", COLOR_TEXT_GREEN);
+        }
+
+        // Swap buffers - display what we just drew
+        graphics_request_buffer_swap(buffer);
+
+        // Toggle buffer index for next frame
+        back_buffer_idx = 1 - back_buffer_idx;
+
+        // Wait for next frame
+        sleep_ms(frame_delay);
+    }
+
+    // Hold final frame briefly
+    sleep_ms(500);
 
     return 0;
 }

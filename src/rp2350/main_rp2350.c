@@ -167,17 +167,8 @@ static void init_stdio(void) {
     // NOTE: stdio_init_all() was already called in init_clocks() before overclocking
 
 #if ENABLE_DEBUG_LOGS
-    // Wait for USB CDC enumeration and terminal connection
-    // RP2350 needs more time than RP2040 for USB enumeration
-    printf("\n\nmurmfrodo4 - Waiting for USB CDC connection... (10 seconds)\n");
-    printf("If you don't see this, connect a USB cable and open a serial terminal.\n\n");
-    
-    // Give user time to connect terminal (10 second countdown)
-    for (int i = 10; i > 0; i--) {
-        printf("Starting in %d...\n", i);
-        sleep_ms(1000);
-    }
-    printf("\n");
+    // Print startup banner (no delay - USB Serial should already be enumerated)
+    printf("\n\n");
 
     // Check reset reason from POWMAN_CHIP_RESET register (0x40100000 + 0x2C)
     volatile uint32_t *chip_reset = (volatile uint32_t*)0x4010002C;
@@ -535,6 +526,10 @@ int main(void) {
     multicore_launch_core1(core1_video_task);
     sleep_ms(100);  // Let Core 1 initialize HDMI IRQ
 
+    // Initialize framebuffer pointers for double buffering (needed by startscreen)
+    framebuffers[0] = g_framebuffer_a;
+    framebuffers[1] = g_framebuffer_b;
+
     // Show start screen with system information
     {
         uint8_t board_num = 1;  // Default to M1
@@ -544,7 +539,7 @@ int main(void) {
         startscreen_info_t screen_info = {
             .title = "MurmC64",
             .subtitle = "Commodore 64 Emulator",
-            .version = "v1.00",
+            .version = FIRMWARE_VERSION,
             .cpu_mhz = CPU_CLOCK_MHZ,
             .psram_mhz = PSRAM_MAX_FREQ_MHZ,
             .board_variant = board_num,
