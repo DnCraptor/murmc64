@@ -582,15 +582,12 @@ bool c64_run_frame(void)
     c64->TheCIA1->Joystick2 = 0xff;
     c64->TheDisplay->PollKeyboard(c64->TheCIA1->KeyMatrix, c64->TheCIA1->RevMatrix, &c64->joykey);
 
-    // Apply joystick to selected port only (F9 swaps ports)
+    // Apply both joystick states to both C64 ports
+    // F9 swaps which physical gamepad controls which port (handled in input_rp2350.cpp)
     // Port 1 = Joystick1 ($DC01), Port 2 = Joystick2 ($DC00)
-    extern int input_get_joy_port(void);
-    int port = input_get_joy_port();
-    if (port == 1) {
-        c64->TheCIA1->Joystick1 &= c64->joykey;
-    } else {
-        c64->TheCIA1->Joystick2 &= c64->joykey;
-    }
+    extern uint8_t input_get_joystick2(void);
+    c64->TheCIA1->Joystick1 &= c64->joykey;           // Port 1 from joystick1
+    c64->TheCIA1->Joystick2 &= input_get_joystick2(); // Port 2 from joystick2
 
     // Run one frame's worth of emulation (line-based)
     bool frame_complete = false;

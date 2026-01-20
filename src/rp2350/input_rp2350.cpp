@@ -523,12 +523,18 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     int pressed;
     unsigned char key;
     while (ps2kbd_get_key(&pressed, &key)) {
-        // F9 swaps joystick port (1 <-> 2)
+        // F9 swaps gamepad port assignments
+        // Default: Gamepad1 -> Port2, Gamepad2 -> Port1
+        // Swapped: Gamepad1 -> Port1, Gamepad2 -> Port2
         if (key == 0xF9) {  // F9
             static bool f9_was_pressed = false;
             if (pressed && !f9_was_pressed) {
                 input_state.joy_port = (input_state.joy_port == 1) ? 2 : 1;
-                MII_DEBUG_PRINTF("Joystick port swapped to: %d\n", input_state.joy_port);
+                if (input_state.joy_port == 2) {
+                    MII_DEBUG_PRINTF("Gamepads: Pad1->Port2, Pad2->Port1 (default)\n");
+                } else {
+                    MII_DEBUG_PRINTF("Gamepads: Pad1->Port1, Pad2->Port2 (swapped)\n");
+                }
             }
             f9_was_pressed = pressed;
             continue;
@@ -791,23 +797,32 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     }
 #endif
 
-    // Poll gamepad
+    // Poll both NES gamepads
     nespad_read();
-    uint8_t pad = nespad_state;
 
-    // Map NES pad to C64 joystick
-    // NES: Right=0x01, Left=0x02, Down=0x04, Up=0x08, Start=0x10, Select=0x20, B=0x40, A=0x80
-    // C64: Up=0x01, Down=0x02, Left=0x04, Right=0x08, Fire=0x10
+    // Map NES pad to C64 joystick format
+    // NES button masks (from nespad.h):
+    //   DPAD_UP=0x000100, DPAD_DOWN=0x000400, DPAD_LEFT=0x001000, DPAD_RIGHT=0x004000
+    //   DPAD_A=0x000001, DPAD_B=0x000004, DPAD_START=0x000040, DPAD_SELECT=0x000010
+    // C64 joystick: Up=0x01, Down=0x02, Left=0x04, Right=0x08, Fire=0x10
 
-    uint8_t joy = 0xFF;  // All released (must be 0xFF to not interfere with keyboard)
+    // Helper lambda to map NES pad state to C64 joystick format
+    auto map_nes_to_c64 = [](uint32_t pad) -> uint8_t {
+        uint8_t joy = 0xFF;  // All released
+        if (pad & DPAD_UP)    joy &= ~0x01;  // Up
+        if (pad & DPAD_DOWN)  joy &= ~0x02;  // Down
+        if (pad & DPAD_LEFT)  joy &= ~0x04;  // Left
+        if (pad & DPAD_RIGHT) joy &= ~0x08;  // Right
+        if (pad & (DPAD_A | DPAD_B)) joy &= ~0x10;  // A or B -> Fire
+        return joy;
+    };
 
-    if (pad & 0x08) joy &= ~0x01;  // Up
-    if (pad & 0x04) joy &= ~0x02;  // Down
-    if (pad & 0x02) joy &= ~0x04;  // Left
-    if (pad & 0x01) joy &= ~0x08;  // Right
-    if (pad & 0xC0) joy &= ~0x10;  // A or B -> Fire
+    // Map both gamepads
+    uint8_t gamepad1_joy = map_nes_to_c64(nespad_state);
+    uint8_t gamepad2_joy = map_nes_to_c64(nespad_state2);
 
     // Keyboard joystick emulation: arrow keys + R-Ctrl/R-Alt for fire
+    // Applied to gamepad 1 position (primary player)
     // Only when disk UI is not visible
 #if ENABLE_PS2_KEYBOARD
     if (!disk_ui_is_visible()) {
@@ -815,29 +830,28 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         uint8_t arrows = ps2kbd_get_arrow_state();
         uint8_t mods = ps2kbd_get_modifiers();
 
-        if (arrows & 0x08) joy &= ~0x01;  // Up (bit 3)
-        if (arrows & 0x04) joy &= ~0x02;  // Down (bit 2)
-        if (arrows & 0x02) joy &= ~0x04;  // Left (bit 1)
-        if (arrows & 0x01) joy &= ~0x08;  // Right (bit 0)
+        if (arrows & 0x08) gamepad1_joy &= ~0x01;  // Up (bit 3)
+        if (arrows & 0x04) gamepad1_joy &= ~0x02;  // Down (bit 2)
+        if (arrows & 0x02) gamepad1_joy &= ~0x04;  // Left (bit 1)
+        if (arrows & 0x01) gamepad1_joy &= ~0x08;  // Right (bit 0)
 
         // R-Ctrl (0x10) or R-Alt (0x40) for fire button
-        if (mods & 0x50) joy &= ~0x10;  // R-Ctrl=0x10, R-Alt=0x40
+        if (mods & 0x50) gamepad1_joy &= ~0x10;  // R-Ctrl=0x10, R-Alt=0x40
     }
 #endif
 
-    input_state.joystick1 = joy;
-
-    // Second joystick from second gamepad
-    uint8_t pad2 = nespad_state2;
-    uint8_t joy2 = 0xFF;
-
-    if (pad2 & 0x08) joy2 &= ~0x01;
-    if (pad2 & 0x04) joy2 &= ~0x02;
-    if (pad2 & 0x02) joy2 &= ~0x04;
-    if (pad2 & 0x01) joy2 &= ~0x08;
-    if (pad2 & 0xC0) joy2 &= ~0x10;
-
-    input_state.joystick2 = joy2;
+    // Apply gamepad swap (F9 toggles joy_port between 1 and 2)
+    // joy_port == 2 (default): Gamepad1 -> Port2 (Joystick2), Gamepad2 -> Port1 (Joystick1)
+    // joy_port == 1 (swapped): Gamepad1 -> Port1 (Joystick1), Gamepad2 -> Port2 (Joystick2)
+    if (input_state.joy_port == 2) {
+        // Default: Gamepad 1 controls Port 2 (most single-player games use this)
+        input_state.joystick2 = gamepad1_joy;  // Port 2 ($DC00)
+        input_state.joystick1 = gamepad2_joy;  // Port 1 ($DC01)
+    } else {
+        // Swapped: Gamepad 1 controls Port 1
+        input_state.joystick1 = gamepad1_joy;  // Port 1 ($DC01)
+        input_state.joystick2 = gamepad2_joy;  // Port 2 ($DC00)
+    }
 
     // Return state
     memcpy(key_matrix, input_state.key_matrix, 8);
