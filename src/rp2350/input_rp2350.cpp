@@ -672,37 +672,37 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     // Process USB HID
     usbhid_wrapper_poll();
 
-    int pressed;
-    unsigned char key;
-    while (usbhid_wrapper_get_key(&pressed, &key)) {
+    int usb_pressed;
+    unsigned char usb_key;
+    while (usbhid_wrapper_get_key(&usb_pressed, &usb_key)) {
         // F10 toggles disk UI
-        if (key == 0xFA) {  // F10
+        if (usb_key == 0xFA) {  // F10
             static bool usb_f10_was_pressed = false;
-            if (pressed && !usb_f10_was_pressed) {
+            if (usb_pressed && !usb_f10_was_pressed) {
                 if (disk_ui_is_visible()) {
                     disk_ui_hide();
                 } else {
                     disk_ui_show();
                 }
             }
-            usb_f10_was_pressed = pressed;
+            usb_f10_was_pressed = usb_pressed;
             continue;
         }
 
         // F11 triggers RESTORE (NMI)
-        if (key == 0xFB) {  // F11
+        if (usb_key == 0xFB) {  // F11
             static bool usb_f11_was_pressed = false;
-            if (pressed && !usb_f11_was_pressed) {
+            if (usb_pressed && !usb_f11_was_pressed) {
                 printf("F11: RESTORE (NMI)\n");
                 c64_nmi();
             }
-            usb_f11_was_pressed = pressed;
+            usb_f11_was_pressed = usb_pressed;
             continue;
         }
 
         // Caps Lock toggles shift lock
-        if (key == 0xE1) {  // Caps Lock
-            if (pressed) {
+        if (usb_key == 0xE1) {  // Caps Lock
+            if (usb_pressed) {
                 input_state.shift_lock = !input_state.shift_lock;
                 printf("Shift Lock: %s\n", input_state.shift_lock ? "ON" : "OFF");
             }
@@ -711,27 +711,27 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
 
         // If disk UI is visible, handle navigation
         if (disk_ui_is_visible()) {
-            if (pressed) {
+            if (usb_pressed) {
                 int state = disk_ui_get_state();
 
                 if (state == DISK_UI_SELECT_FILE) {
                     // File selection mode
-                    if (key == 0x0B || key == 0x52) {  // Up arrow
+                    if (usb_key == 0x0B || usb_key == 0x52) {  // Up arrow
                         disk_ui_move_up();
-                    } else if (key == 0x0A || key == 0x51) {  // Down arrow
+                    } else if (usb_key == 0x0A || usb_key == 0x51) {  // Down arrow
                         disk_ui_move_down();
-                    } else if (key == 0x0D) {  // Enter - show action menu
+                    } else if (usb_key == 0x0D) {  // Enter - show action menu
                         disk_ui_select();
-                    } else if (key == 0x1B) {  // Escape - close UI
+                    } else if (usb_key == 0x1B) {  // Escape - close UI
                         disk_ui_hide();
                     }
                 } else if (state == DISK_UI_SELECT_ACTION) {
                     // Action selection mode
-                    if (key == 0x0B || key == 0x52) {  // Up arrow
+                    if (usb_key == 0x0B || usb_key == 0x52) {  // Up arrow
                         disk_ui_action_up();
-                    } else if (key == 0x0A || key == 0x51) {  // Down arrow
+                    } else if (usb_key == 0x0A || usb_key == 0x51) {  // Down arrow
                         disk_ui_action_down();
-                    } else if (key == 0x0D) {  // Enter - confirm action
+                    } else if (usb_key == 0x0D) {  // Enter - confirm action
                         int sel = disk_ui_get_selected();
                         int action = disk_ui_get_action();
                         const char *path = disk_loader_get_path(sel);
@@ -747,7 +747,7 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
                             }
                             disk_ui_confirm_action();
                         }
-                    } else if (key == 0x1B) {  // Escape - back to file list
+                    } else if (usb_key == 0x1B) {  // Escape - back to file list
                         disk_ui_cancel_action();
                     }
                 }
@@ -755,9 +755,9 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
             continue;
         }
 
-        int c64_key = ascii_to_c64_matrix(key);
+        int c64_key = ascii_to_c64_matrix(usb_key);
         if (c64_key >= 0) {
-            set_c64_key(c64_key, pressed != 0);
+            set_c64_key(c64_key, usb_pressed != 0);
         }
     }
 

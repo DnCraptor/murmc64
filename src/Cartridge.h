@@ -255,6 +255,41 @@ protected:
 };
 
 
+// EasyFlash cartridge (banked 8K+8K ROM cartridge with RAM)
+class CartridgeEasyFlash : public Cartridge {
+public:
+	CartridgeEasyFlash();
+	~CartridgeEasyFlash();
+
+	void Reset() override;
+
+	uint8_t ReadROML(uint16_t adr, uint8_t ram_byte, bool notLoram) override;
+	uint8_t ReadROMH(uint16_t adr, uint8_t ram_byte, uint8_t basic_byte, bool notLoram, bool notHiram) override;
+
+	uint8_t ReadIO1(uint16_t adr, uint8_t bus_byte) override;
+	void WriteIO1(uint16_t adr, uint8_t byte) override;
+	uint8_t ReadIO2(uint16_t adr, uint8_t bus_byte) override;
+	void WriteIO2(uint16_t adr, uint8_t byte) override;
+
+	uint8_t * RomL() const { return roml; }
+	uint8_t * RomH() const { return romh; }
+
+	static const unsigned NUM_BANKS = 64;
+	static const unsigned BANK_SIZE = 0x2000;  // 8KB per bank
+
+protected:
+	void UpdateMemConfig();
+
+	uint8_t * roml = nullptr;	// ROML banks (64 * 8KB = 512KB)
+	uint8_t * romh = nullptr;	// ROMH banks (64 * 8KB = 512KB)
+	uint8_t ram[256];			// 256 bytes of RAM at $DF00-$DFFF
+
+	uint8_t bank = 0;			// Bank register ($DE00)
+	uint8_t mode = 0;			// Mode register ($DE02)
+	bool jumper = false;		// Hardware jumper (start in boot mode)
+};
+
+
 /*
  *  Functions
  */

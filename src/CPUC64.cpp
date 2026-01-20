@@ -276,10 +276,12 @@ inline uint8_t MOS6510::read_byte_io(uint16_t adr)
 	switch (adr >> 12) {
 		case 0x8:	// Cartridge ROML or RAM
 		case 0x9:
-			if (the_cart->notEXROM) {
-				return ram[adr];
-			} else {
+			// ROML visible in: 8K mode (!notEXROM), 16K mode (!notEXROM && !notGAME), Ultimax (!notGAME && notEXROM)
+			// Simplified: ROML visible if !notEXROM OR !notGAME
+			if (!the_cart->notEXROM || !the_cart->notGAME) {
 				return the_cart->ReadROML(adr & 0x1fff, ram[adr], basic_in);
+			} else {
+				return ram[adr];
 			}
 		case 0xa:	// Cartridge ROMH or RAM or BASIC ROM
 		case 0xb:
@@ -315,11 +317,9 @@ inline uint8_t MOS6510::read_byte_io(uint16_t adr)
 					case 0xe:	// Cartridge I/O 1 (or open)
 						return the_cart->ReadIO1(adr & 0xff, rand());
 					case 0xf:	// Cartridge I/O 2 (or open)
-						if (adr < 0xdfa0) {
-							return the_cart->ReadIO2(adr & 0xff, rand());
-						} else {
-							return read_emulator_id(adr & 0x7f);
-						}
+						// Full $DF00-$DFFF access for cartridges
+						// EasyFlash needs all 256 bytes of RAM at this location
+						return the_cart->ReadIO2(adr & 0xff, rand());
 				}
 			} else if (char_in) {
 				return char_rom[adr & 0x0fff];
@@ -328,7 +328,10 @@ inline uint8_t MOS6510::read_byte_io(uint16_t adr)
 			}
 		case 0xe:
 		case 0xf:
-			if (kernal_in) {
+			// In Ultimax mode (!notGAME && notEXROM), ROMH is at $E000-$FFFF
+			if (!the_cart->notGAME && the_cart->notEXROM) {
+				return the_cart->ReadROMH(adr & 0x1fff, ram[adr], kernal_rom[adr & 0x1fff], basic_in, kernal_in);
+			} else if (kernal_in) {
 				return kernal_rom[adr & 0x1fff];
 			} else {
 				return ram[adr];
@@ -412,7 +415,10 @@ inline uint16_t MOS6510::read_word(uint16_t adr)
 			}
 		case 0xe:
 		case 0xf:
-			if (kernal_in) {
+			// In Ultimax mode, ROMH is at $E000-$FFFF
+			if (!the_cart->notGAME && the_cart->notEXROM) {
+				return read_byte_io(adr) | (read_byte_io(adr + 1) << 8);
+			} else if (kernal_in) {
 				return *(uint16_t *)&kernal_rom[adr & 0x1fff];
 			} else {
 				return *(uint16_t *)&ram[adr];

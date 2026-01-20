@@ -334,6 +334,198 @@ void CartridgeComal80::WriteIO1(uint16_t adr, uint8_t byte)
 
 
 /*
+ *  EasyFlash cartridge implementation
+ *  Based on official EasyFlash Programmer's Guide by Thomas 'skoe' Giesel
+ *  https://skoe.de/easyflash/files/devdocs/EasyFlash-ProgRef.pdf
+ *
+ *  Hardware:
+ *  - Two 512 KiB flash chips (ROML and ROMH), 64 banks of 8 KiB each
+ *  - 256 bytes of RAM at $DF00-$DFFF (always visible)
+ *  - Bank register at $DE00 (write-only)
+ *  - Control register at $DE02 (write-only)
+ */
+
+#ifdef FRODO_RP2350
+#include "psram_allocator.h"
+#endif
+
+CartridgeEasyFlash::CartridgeEasyFlash()
+{
+	// Allocate ROML and ROMH banks (64 * 8KB each = 512KB each)
+#ifdef FRODO_RP2350
+	roml = (uint8_t *)psram_malloc(NUM_BANKS * BANK_SIZE);
+	romh = (uint8_t *)psram_malloc(NUM_BANKS * BANK_SIZE);
+#else
+	roml = new uint8_t[NUM_BANKS * BANK_SIZE];
+	romh = new uint8_t[NUM_BANKS * BANK_SIZE];
+#endif
+	memset(roml, 0xff, NUM_BANKS * BANK_SIZE);
+	memset(romh, 0xff, NUM_BANKS * BANK_SIZE);
+	memset(ram, 0xff, sizeof(ram));
+
+	// Boot jumper in "Boot" position (directly start cartridge)
+	jumper = true;
+
+	// Initial state: Ultimax mode (per official docs, boot starts in Ultimax)
+	notEXROM = true;   // /EXROM high
+	notGAME = false;   // /GAME low
+}
+
+CartridgeEasyFlash::~CartridgeEasyFlash()
+{
+#ifdef FRODO_RP2350
+	psram_free(roml);
+	psram_free(romh);
+#else
+	delete[] roml;
+	delete[] romh;
+#endif
+}
+
+void CartridgeEasyFlash::Reset()
+{
+	// Per official docs: "The value after reset is $00" for both registers
+	bank = 0;
+	mode = 0;
+
+	// Per official docs section 2.2:
+	// "If the boot switch is in position 'Boot' and the computer is reset,
+	//  EasyFlash is started normally: The Ultimax memory configuration is set,
+	//  bank 0 selected. The CPU starts at the reset vector at $FFFC."
+	// "In Ultimax mode the ROMH chip is banked in at $E000"
+	if (jumper) {
+		// Boot mode: Ultimax configuration
+		notEXROM = true;   // /EXROM high
+		notGAME = false;   // /GAME low
+	} else {
+		// Disable mode: Cartridge hidden
+		notEXROM = true;   // /EXROM high
+		notGAME = true;    // /GAME high
+	}
+}
+
+/*
+ *  Update memory configuration based on mode register ($DE02)
+ *
+ *  From official docs Table 2.4 - Bits of $DE02:
+ *    Bit 7 (L): LED
+ *    Bit 2 (M): GAME mode, 1 = controlled by bit G, 0 = from jumper "boot"
+ *    Bit 1 (X): EXROM state, 0 = /EXROM high
+ *    Bit 0 (G): GAME state if M = 1, 0 = /GAME high
+ *
+ *  From official docs Table 2.5 - MXG configurations:
+ *    MXG=000: GAME from jumper, EXROM high (Ultimax or Off depending on jumper)
+ *    MXG=001: Reserved
+ *    MXG=010: GAME from jumper, EXROM low (16K or 8K depending on jumper)
+ *    MXG=011: Reserved
+ *    MXG=100: Cartridge ROM off (RAM at $DF00 still available)
+ *    MXG=101: Ultimax (ROML at $8000, ROMH at $E000)
+ *    MXG=110: 8K Cartridge (ROML at $8000)
+ *    MXG=111: 16K Cartridge (ROML at $8000, ROMH at $A000)
+ *
+ *  From official docs Table 2.1 - /GAME and /EXROM states:
+ *    /GAME=1, /EXROM=1: Invisible (off)
+ *    /GAME=1, /EXROM=0: 8K mode
+ *    /GAME=0, /EXROM=0: 16K mode
+ *    /GAME=0, /EXROM=1: Ultimax mode
+ */
+void CartridgeEasyFlash::UpdateMemConfig()
+{
+	uint8_t M = (mode >> 2) & 1;  // Bit 2: GAME mode select
+	uint8_t X = (mode >> 1) & 1;  // Bit 1: EXROM state
+	uint8_t G = mode & 1;         // Bit 0: GAME state
+
+	// Determine /EXROM: X=0 means /EXROM high (inactive), X=1 means /EXROM low (active)
+	notEXROM = (X == 0);
+
+	// Determine /GAME based on M bit
+	if (M == 1) {
+		// GAME controlled by G bit: G=0 means /GAME high, G=1 means /GAME low
+		notGAME = (G == 0);
+	} else {
+		// GAME from jumper: jumper=true (Boot) means /GAME low, jumper=false (Disable) means /GAME high
+		notGAME = !jumper;
+	}
+}
+
+uint8_t CartridgeEasyFlash::ReadROML(uint16_t adr, uint8_t ram_byte, bool notLoram)
+{
+	// ROML is visible at $8000-$9FFF in these modes:
+	// - 8K mode:    /GAME=1, /EXROM=0 -> ROML when LORAM high
+	// - 16K mode:   /GAME=0, /EXROM=0 -> ROML when LORAM high
+	// - Ultimax:    /GAME=0, /EXROM=1 -> ROML always visible
+
+	if (!notEXROM) {
+		// 8K or 16K mode: ROML at $8000 only when LORAM high
+		return notLoram ? roml[bank * BANK_SIZE + adr] : ram_byte;
+	} else if (!notGAME) {
+		// Ultimax mode: ROML always visible at $8000
+		return roml[bank * BANK_SIZE + adr];
+	}
+
+	// Cartridge off: return RAM
+	return ram_byte;
+}
+
+uint8_t CartridgeEasyFlash::ReadROMH(uint16_t adr, uint8_t ram_byte, uint8_t basic_byte, bool notLoram, bool notHiram)
+{
+	// ROMH visibility:
+	// - 16K mode:   /GAME=0, /EXROM=0 -> ROMH at $A000 when HIRAM high
+	// - Ultimax:    /GAME=0, /EXROM=1 -> ROMH at $E000 always visible
+
+	if (!notGAME && !notEXROM) {
+		// 16K mode: ROMH at $A000 only when HIRAM high
+		return notHiram ? romh[bank * BANK_SIZE + adr] : ram_byte;
+	} else if (!notGAME && notEXROM) {
+		// Ultimax mode: ROMH always visible at $E000
+		return romh[bank * BANK_SIZE + adr];
+	}
+
+	// 8K mode or cartridge off: return BASIC ROM or RAM
+	return notLoram ? basic_byte : ram_byte;
+}
+
+uint8_t CartridgeEasyFlash::ReadIO1(uint16_t adr, uint8_t bus_byte)
+{
+	// Per official docs: $DE00 and $DE02 are write-only registers
+	// Reading returns open bus
+	return bus_byte;
+}
+
+void CartridgeEasyFlash::WriteIO1(uint16_t adr, uint8_t byte)
+{
+	// I/O 1 area is $DE00-$DEFF, mirrored
+	// Only $DE00 and $DE02 are used
+
+	if ((adr & 0x02) == 0) {
+		// $DE00, $DE04, $DE08, etc.: Bank register
+		// Per official docs Table 2.2: bits 5-0 are bank, bits 7-6 must be 0
+		bank = byte & 0x3f;
+	} else {
+		// $DE02, $DE06, $DE0A, etc.: Control register
+		// Per official docs Table 2.3: bits used are 7 (LED), 2 (M), 1 (X), 0 (G)
+		mode = byte & 0x87;  // Mask valid bits
+		UpdateMemConfig();
+	}
+}
+
+uint8_t CartridgeEasyFlash::ReadIO2(uint16_t adr, uint8_t bus_byte)
+{
+	// Per official docs section 2.3:
+	// "An EasyFlash cartridge has 256 Bytes of RAM. This memory is always visible.
+	//  It can be used to save small portions of code or data...
+	//  The RAM is located at $DF00."
+	return ram[adr & 0xff];
+}
+
+void CartridgeEasyFlash::WriteIO2(uint16_t adr, uint8_t byte)
+{
+	// Per official docs: RAM at $DF00-$DFFF is always writable
+	ram[adr & 0xff] = byte;
+}
+
+
+/*
  *  Check whether file is a cartridge image file
  */
 
@@ -398,6 +590,10 @@ Cartridge * Cartridge::FromFile(const std::string & path, std::string & ret_erro
 		uint8_t exrom = header[0x18];
 		uint8_t game = header[0x19];
 
+#ifdef FRODO_RP2350
+		printf("CRT: type=%d exrom=%d game=%d\n", type, exrom, game);
+#endif
+
 		switch (type) {
 			case 0:
 				if (exrom != 0)		// Ultimax or not a ROM cartridge
@@ -435,11 +631,59 @@ Cartridge * Cartridge::FromFile(const std::string & path, std::string & ret_erro
 			case 21:
 				cart = new CartridgeComal80;
 				break;
+			case 32: {
+				// EasyFlash cartridge - special handling (not ROMCartridge)
+				CartridgeEasyFlash * ef = new CartridgeEasyFlash;
+
+				// Load CHIP packets for EasyFlash
+				while (true) {
+					size_t actual = fread(header, 1, 16, f);
+					if (actual == 0)
+						break;
+					if (actual != 16) {
+						delete ef;
+						goto error_read;
+					}
+
+					uint16_t chip_type  = (header[0x08] << 8) | header[0x09];
+					uint16_t chip_bank  = (header[0x0a] << 8) | header[0x0b];
+					uint16_t chip_start = (header[0x0c] << 8) | header[0x0d];
+					uint16_t chip_size  = (header[0x0e] << 8) | header[0x0f];
+
+					// chip_type: 0=ROM, 1=RAM, 2=Flash ROM (EasyFlash uses 2)
+					if (memcmp(header, "CHIP", 4) != 0 ||
+					    (chip_type != 0 && chip_type != 2) ||
+					    chip_bank >= CartridgeEasyFlash::NUM_BANKS ||
+					    chip_size > CartridgeEasyFlash::BANK_SIZE) {
+						delete ef;
+						goto error_unsupp;
+					}
+
+					// Load to ROML ($8000) or ROMH ($A000/$E000) based on chip_start
+					uint8_t * dest;
+					if (chip_start == 0x8000) {
+						dest = ef->RomL() + chip_bank * CartridgeEasyFlash::BANK_SIZE;
+					} else if (chip_start == 0xa000 || chip_start == 0xe000) {
+						dest = ef->RomH() + chip_bank * CartridgeEasyFlash::BANK_SIZE;
+					} else {
+						delete ef;
+						goto error_unsupp;
+					}
+
+					if (fread(dest, chip_size, 1, f) != 1) {
+						delete ef;
+						goto error_read;
+					}
+				}
+
+				fclose(f);
+				return ef;
+			}
 			default:
 				goto error_unsupp;
 		}
 
-		// Load CHIP packets
+		// Load CHIP packets for standard ROMCartridge types
 		while (true) {
 
 			// Load packet header
