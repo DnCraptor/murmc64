@@ -19,6 +19,7 @@ extern "C" {
 
 #ifdef USB_HID_ENABLED
 #include "usbhid/usbhid_wrapper.h"
+#include "usbhid/usbhid.h"
 #endif
 
 // Disk UI functions
@@ -817,9 +818,26 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         return joy;
     };
 
-    // Map both gamepads
+    // Map both NES gamepads
     uint8_t gamepad1_joy = map_nes_to_c64(nespad_state);
     uint8_t gamepad2_joy = map_nes_to_c64(nespad_state2);
+
+#ifdef USB_HID_ENABLED
+    // Merge USB gamepad input (active-low, so AND the values)
+    // USB gamepad dpad: bit 0=up, 1=down, 2=left, 3=right
+    // USB gamepad buttons: bit 0=A, 1=B, etc.
+    if (usbhid_gamepad_connected()) {
+        usbhid_gamepad_state_t usb_gp;
+        usbhid_get_gamepad_state(&usb_gp);
+
+        // Map USB gamepad to C64 joystick and merge with NES gamepad 1
+        if (usb_gp.dpad & 0x01) gamepad1_joy &= ~0x01;  // Up
+        if (usb_gp.dpad & 0x02) gamepad1_joy &= ~0x02;  // Down
+        if (usb_gp.dpad & 0x04) gamepad1_joy &= ~0x04;  // Left
+        if (usb_gp.dpad & 0x08) gamepad1_joy &= ~0x08;  // Right
+        if (usb_gp.buttons & 0x03) gamepad1_joy &= ~0x10;  // A or B -> Fire
+    }
+#endif
 
     // Keyboard joystick emulation: arrow keys + R-Ctrl/R-Alt for fire
     // Applied to gamepad 1 position (primary player)
