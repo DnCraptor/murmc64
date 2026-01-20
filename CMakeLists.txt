@@ -99,6 +99,7 @@ add_executable(murmfrodo4
     src/rp2350/input_rp2350.cpp
     src/rp2350/disk_loader.c
     src/rp2350/disk_ui.c
+    src/rp2350/startscreen.c
     src/rp2350/fatfs_stdio.c
 
     # Frodo4 emulator core (C++) - full emulation

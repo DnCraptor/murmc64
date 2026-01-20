@@ -22,6 +22,9 @@ extern "C" {
 #include "usbhid/usbhid.h"
 #endif
 
+// Start screen
+#include "startscreen.h"
+
 // Disk UI functions
 void disk_ui_init(void);
 void disk_ui_show(void);

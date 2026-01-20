@@ -42,6 +42,9 @@
 #include "sdcard/sdcard.h"
 #include "fatfs/ff.h"
 
+// Start screen
+#include "startscreen.h"
+
 // Forward declarations for timing functions
 static uint32_t rp2350_get_ticks_ms(void);
 static uint64_t rp2350_get_ticks_us(void);
@@ -519,6 +522,28 @@ int main(void) {
     // Set C64 color palette
     init_c64_palette();
 
+    // Launch Core 1 for video rendering (needed for HDMI output)
+    MII_DEBUG_PRINTF("Launching Core 1...\n");
+    multicore_launch_core1(core1_video_task);
+    sleep_ms(100);  // Let Core 1 initialize HDMI IRQ
+
+    // Show start screen with system information
+    {
+        uint8_t board_num = 1;  // Default to M1
+#ifdef BOARD_M2
+        board_num = 2;
+#endif
+        startscreen_info_t screen_info = {
+            .title = "MurmC64",
+            .subtitle = "Commodore 64 Emulator",
+            .version = "v1.00",
+            .cpu_mhz = CPU_CLOCK_MHZ,
+            .psram_mhz = PSRAM_MAX_FREQ_MHZ,
+            .board_variant = board_num,
+        };
+        startscreen_show(&screen_info);
+    }
+
     // Initialize input devices
     init_input();
 
@@ -527,11 +552,6 @@ int main(void) {
 
     // Initialize audio (I2S)
     init_audio();
-
-    // Launch Core 1 for video rendering
-    MII_DEBUG_PRINTF("Launching Core 1...\n");
-    multicore_launch_core1(core1_video_task);
-    sleep_ms(100);  // Let Core 1 start
 
     // Run emulator on Core 0
     emulator_main_loop();
