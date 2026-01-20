@@ -111,6 +111,7 @@ void MOS6502_1541::AsyncReset()
 {
 	int_line[INT_RESET1541] = true;
 	Idle = false;
+	interrupt_delay = 0;
 }
 
 
@@ -124,6 +125,8 @@ void MOS6502_1541::Reset()
 	int_line[INT_VIA1IRQ] = false;
 	int_line[INT_VIA2IRQ] = false;
 	int_line[INT_RESET1541] = false;
+	
+	interrupt_delay = 0;
 
 	nmi_triggered = false;
 
@@ -588,6 +591,11 @@ int MOS6502_1541::EmulateLine(int cycles_left)
 #define CHECK_SO \
 	if (set_overflow_enabled() && the_gcr_disk->ByteReady(cycle_counter)) { \
 		v_flag = true; \
+	}
+	
+	if (interrupt_delay > 0) {
+		interrupt_delay--;
+		return 0; // Return immediately to let EmulateLine be called again
 	}
 
 #include "CPU_emulline.h"

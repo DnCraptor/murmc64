@@ -26,7 +26,7 @@
 
 // Set this to 1 for more precise CPU cycle calculation
 #ifndef PRECISE_CPU_CYCLES
-#define PRECISE_CPU_CYCLES 0
+#define PRECISE_CPU_CYCLES 1
 #endif
 
 // Set this to 1 for instruction-aligned CIA emulation
@@ -134,6 +134,8 @@ public:
 		z_flag = (val & 0x02) ? 0 : 1;  // Z flag set when result is 0
 		c_flag = (val & 0x01) != 0;
 	}
+
+	int interrupt_delay;
 
 	int ExtConfig;			// Memory configuration for ExtRead/WriteByte (0..7)
 

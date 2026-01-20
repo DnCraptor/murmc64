@@ -798,7 +798,8 @@ handle_int:
 		case 0x28:	// PLP
 			pop_flags();
 			if (IRQ_PENDING && !i_flag)
-				goto handle_int;
+				//goto handle_int;
+				interrupt_delay = 1;
 			ENDOP(4);
 
 
@@ -833,7 +834,8 @@ handle_int:
 			adr = adr | (pop_byte() << 8);
 			jump(adr);
 			if (IRQ_PENDING && !i_flag)
-				goto handle_int;
+				//goto handle_int;
+				interrupt_delay = 1;
 			ENDOP(6);
 
 		case 0x00:	// BRK
@@ -910,7 +912,8 @@ handle_int:
 		case 0x58:	// CLI
 			i_flag = false;
 			if (IRQ_PENDING)
-				goto handle_int;
+				//goto handle_int;
+				interrupt_delay = 1;
 			ENDOP(2);
 
 		case 0xb8:	// CLV

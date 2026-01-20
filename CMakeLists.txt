@@ -201,6 +201,9 @@ if(USB_HID_ENABLED)
     message(STATUS "USB CDC stdio disabled (USB HID Host is enabled)")
 else()
     pico_enable_stdio_usb(murmfrodo4 1)
+    # Explicitly link TinyUSB Device to ensure it's pulled in for stdio
+    target_link_libraries(murmfrodo4 tinyusb_device tinyusb_board)
+    message(STATUS "USB CDC stdio ENABLED (USB HID Host is disabled)")
 endif()
 pico_enable_stdio_uart(murmfrodo4 1)
 

@@ -162,14 +162,17 @@ static void init_stdio(void) {
     stdio_init_all();
 
 #if ENABLE_DEBUG_LOGS
-    // Wait for USB serial connection (5 second countdown)
-    // This allows time to connect a terminal before boot messages scroll by
-    printf("\n\nmurmfrodo4 - Starting in ");
-    for (int i = 5; i > 0; i--) {
-        printf("%d...", i);
+    // Wait for USB CDC enumeration and terminal connection
+    // RP2350 needs more time than RP2040 for USB enumeration
+    printf("\n\nmurmfrodo4 - Waiting for USB CDC connection... (10 seconds)\n");
+    printf("If you don't see this, connect a USB cable and open a serial terminal.\n\n");
+    
+    // Give user time to connect terminal (10 second countdown)
+    for (int i = 10; i > 0; i--) {
+        printf("Starting in %d...\n", i);
         sleep_ms(1000);
     }
-    printf("\n\n");
+    printf("\n");
 
     // Check reset reason from POWMAN_CHIP_RESET register (0x40100000 + 0x2C)
     volatile uint32_t *chip_reset = (volatile uint32_t*)0x4010002C;

@@ -81,6 +81,8 @@ public:
 							// Wire-AND with C64 state to obtain physical line state
 
 	bool Idle;				// true: 1541 is idle
+	
+	int interrupt_delay;
 
 private:
 	uint8_t read_byte(uint16_t adr);
