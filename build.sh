@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build murmfrodo4 - Commodore 64 emulator (Frodo4) for RP2350
+# Build MurmC64 - Commodore 64 emulator (Frodo4) for RP2350
+# Copyright (c) 2024-2026 Mikhail Matveev <xtreme@rh1.tech>
 
 rm -rf ./build
 mkdir build

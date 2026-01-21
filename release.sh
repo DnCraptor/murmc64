@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2024-2026 Mikhail Matveev <xtreme@rh1.tech>
 #
 # release.sh - Build all release variants of MurmC64
 #
@@ -154,8 +155,8 @@ for config in "${CONFIGS[@]}"; do
     # Build
     if make -j8 > /dev/null 2>&1; then
         # Copy UF2 to release directory
-        if [[ -f "murmfrodo4.uf2" ]]; then
-            cp "murmfrodo4.uf2" "$RELEASE_DIR/$OUTPUT_NAME"
+        if [[ -f "murmc64.uf2" ]]; then
+            cp "murmc64.uf2" "$RELEASE_DIR/$OUTPUT_NAME"
             echo -e "  ${GREEN}✓ Success${NC} → release/$OUTPUT_NAME"
         else
             echo -e "  ${RED}✗ UF2 not found${NC}"

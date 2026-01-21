@@ -1,5 +1,7 @@
 /*
- * startscreen.c - Demoscene-style welcome screen for murmfrodo4
+ * startscreen.c - Demoscene-style welcome screen for MurmC64
+ *
+ * Copyright (c) 2024-2026 Mikhail Matveev <xtreme@rh1.tech>
  *
  * Features:
  * - 250-color gradient palette

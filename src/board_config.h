@@ -1,8 +1,10 @@
 /*
  * board_config.h
  *
- * Board configuration for murmfrodo4 - Commodore 64 emulator (Frodo4) for RP2350
+ * Board configuration for MurmC64 - Commodore 64 emulator (Frodo4) for RP2350
  * Based on murmapple board configuration
+ *
+ * Copyright (c) 2024-2026 Mikhail Matveev <xtreme@rh1.tech>
  */
 #ifndef BOARD_CONFIG_H
 #define BOARD_CONFIG_H

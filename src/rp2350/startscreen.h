@@ -1,7 +1,9 @@
 /*
- * startscreen.h - Welcome/start screen for murmfrodo4
+ * startscreen.h - Welcome/start screen for MurmC64
  *
  * Displays system information on startup before emulation begins.
+ *
+ * Copyright (c) 2024-2026 Mikhail Matveev <xtreme@rh1.tech>
  */
 
 #ifndef STARTSCREEN_H

@@ -46,7 +46,7 @@ option(FRODO_LITE "Use Frodo Lite (line-based emulation)" ON)
 # Firmware version string (set by release.sh or manually)
 set(FIRMWARE_VERSION "v1.00" CACHE STRING "Firmware version string for display")
 
-message(STATUS "murmfrodo4 - Commodore 64 Emulator (Frodo4) for RP2350")
+message(STATUS "MurmC64 - Commodore 64 Emulator (Frodo4) for RP2350")
 message(STATUS "Board: ${BOARD_VARIANT}, CPU: ${CPU_SPEED} MHz, PSRAM: ${PSRAM_SPEED} MHz, Voltage: ${CPU_VOLTAGE}")
 message(STATUS "I2S Audio: DATA=${I2S_DATA_PIN}, CLK_BASE=${I2S_CLOCK_PIN_BASE}")
 
@@ -58,7 +58,7 @@ if(EXISTS ${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
     include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
 endif()
 
-project(murmfrodo4 C CXX ASM)
+project(murmc64 C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 
@@ -90,7 +90,7 @@ target_compile_definitions(drivers PRIVATE
 target_link_libraries(drivers pico_stdlib hardware_dma hardware_pio hardware_spi)
 
 # Frodo4 C64 Emulator sources
-add_executable(murmfrodo4
+add_executable(murmc64
     # RP2350 Platform layer
     src/rp2350/main_rp2350.c
     src/rp2350/Display_rp2350.cpp
@@ -127,16 +127,16 @@ if(FRODO_LITE)
     message(STATUS "Using Frodo Lite (line-based emulation)")
 else()
     message(STATUS "Using Frodo SC (subcycle-accurate emulation)")
-    target_compile_definitions(murmfrodo4 PRIVATE FRODO_SC=1)
+    target_compile_definitions(murmc64 PRIVATE FRODO_SC=1)
 endif()
 
-target_include_directories(murmfrodo4 PRIVATE
+target_include_directories(murmc64 PRIVATE
     src
     src/rp2350
     drivers
 )
 
-target_compile_definitions(murmfrodo4 PRIVATE
+target_compile_definitions(murmc64 PRIVATE
     BOARD_${BOARD_VARIANT}
     CPU_CLOCK_MHZ=${CPU_SPEED}
     CPU_VOLTAGE=${CPU_VOLTAGE}
@@ -158,22 +158,22 @@ target_compile_definitions(murmfrodo4 PRIVATE
 )
 
 if(PS2_KEYBOARD_ENABLED)
-    target_compile_definitions(murmfrodo4 PRIVATE ENABLE_PS2_KEYBOARD=1)
+    target_compile_definitions(murmc64 PRIVATE ENABLE_PS2_KEYBOARD=1)
 else()
-    target_compile_definitions(murmfrodo4 PRIVATE ENABLE_PS2_KEYBOARD=0)
+    target_compile_definitions(murmc64 PRIVATE ENABLE_PS2_KEYBOARD=0)
 endif()
 
 if(DEBUG_LOGS_ENABLED)
-    target_compile_definitions(murmfrodo4 PRIVATE ENABLE_DEBUG_LOGS=1)
+    target_compile_definitions(murmc64 PRIVATE ENABLE_DEBUG_LOGS=1)
 else()
-    target_compile_definitions(murmfrodo4 PRIVATE ENABLE_DEBUG_LOGS=0)
+    target_compile_definitions(murmc64 PRIVATE ENABLE_DEBUG_LOGS=0)
 endif()
 
 # Optimization for maximum performance on RP2350
 # -O3: Maximum optimization including loop vectorization
 # -ffunction-sections -fdata-sections: Allow linker to remove unused code
 # -fno-strict-aliasing: Allow type punning (common in emulators)
-target_compile_options(murmfrodo4 PRIVATE
+target_compile_options(murmc64 PRIVATE
     -O3
     -ffunction-sections
     -fdata-sections
@@ -182,7 +182,7 @@ target_compile_options(murmfrodo4 PRIVATE
     -fno-rtti
 )
 
-target_link_libraries(murmfrodo4
+target_link_libraries(murmc64
     pico_stdlib
     pico_multicore
     pico_audio_i2s
@@ -201,15 +201,15 @@ target_link_libraries(murmfrodo4
 # USB CDC stdio: enabled for debugging, but disabled when USB HID is enabled
 # (USB port can only be Host OR Device, not both)
 if(USB_HID_ENABLED)
-    pico_enable_stdio_usb(murmfrodo4 0)
+    pico_enable_stdio_usb(murmc64 0)
     message(STATUS "USB CDC stdio disabled (USB HID Host is enabled)")
 else()
-    pico_enable_stdio_usb(murmfrodo4 1)
+    pico_enable_stdio_usb(murmc64 1)
     # NOTE: Do NOT explicitly link tinyusb_device - pico_enable_stdio_usb handles it
     # Explicit linking causes "CDC not enabled" warning and breaks USB Serial!
     message(STATUS "USB CDC stdio ENABLED (USB HID Host is disabled)")
 endif()
-pico_enable_stdio_uart(murmfrodo4 1)
+pico_enable_stdio_uart(murmc64 1)
 
 # Create UF2 output
-pico_add_extra_outputs(murmfrodo4)
+pico_add_extra_outputs(murmc64)

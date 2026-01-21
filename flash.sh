@@ -1,8 +1,9 @@
 #!/bin/bash
-# Flash murmfrodo4 to connected Pico device
+# Flash MurmC64 to connected Pico device
+# Copyright (c) 2024-2026 Mikhail Matveev <xtreme@rh1.tech>
 
 # Default to ELF file from build directory
-FIRMWARE="${1:-./build/murmfrodo4.elf}"
+FIRMWARE="${1:-./build/murmc64.elf}"
 
 # Check if firmware file exists
 if [ ! -f "$FIRMWARE" ]; then
@@ -11,7 +12,7 @@ if [ ! -f "$FIRMWARE" ]; then
     if [ ! -f "$FIRMWARE" ]; then
         echo "Error: Firmware file not found"
         echo "Usage: $0 [firmware.elf|firmware.uf2]"
-        echo "Default: ./build/murmfrodo4.elf"
+        echo "Default: ./build/murmc64.elf"
         exit 1
     fi
 fi

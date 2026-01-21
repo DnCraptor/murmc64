@@ -16,14 +16,12 @@ Both boards provide all necessary peripherals out of the box—no additional wir
 ## Features
 
 - Full Commodore 64 PAL emulation (50 Hz)
-- Native 320x240 HDMI video output via PIO
+- Native 640x480 (320x240) HDMI video output via PIO
 - 8MB QSPI PSRAM support for C64 RAM and disk images
 - SD card support for D64/D81 disk images
 - PS/2 and USB keyboard input
 - NES/SNES gamepad support (directly and via USB)
 - I2S audio output with SID emulation
-- On-screen disk selector (F10)
-- Demoscene-style animated startup screen
 
 ## Hardware Requirements
 
@@ -100,8 +98,8 @@ Two GPIO layouts are supported: **M1** and **M2**. The PSRAM pin is auto-detecte
 
 ```bash
 # Clone the repository with submodules
-git clone --recursive https://github.com/rh1tech/murmfrodo4.git
-cd murmfrodo4
+git clone --recursive https://github.com/rh1tech/murmc64.git
+cd murmc64
 
 # Or if already cloned, initialize submodules
 git submodule update --init --recursive
@@ -140,10 +138,10 @@ Speed presets:
 
 ```bash
 # With device in BOOTSEL mode:
-picotool load build/murmfrodo4.uf2
+picotool load build/murmc64.uf2
 
 # Or with device running:
-picotool load -f build/murmfrodo4.uf2
+picotool load -f build/murmc64.uf2
 
 # Or use the flash script:
 ./flash.sh

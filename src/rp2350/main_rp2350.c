@@ -1,10 +1,12 @@
 /*
- *  main_rp2350.c - Main entry point for Frodo4 C64 Emulator on RP2350
+ *  main_rp2350.c - Main entry point for MurmC64 (Frodo4 C64 Emulator) on RP2350
  *
  *  This initializes all hardware and starts the emulator.
  *
  *  Core 0: CPU emulation, VIC, SID, CIA, 1541
  *  Core 1: HDMI rendering
+ *
+ *  Copyright (c) 2024-2026 Mikhail Matveev <xtreme@rh1.tech>
  */
 
 #include "board_config.h"
@@ -190,7 +192,7 @@ static void init_stdio(void) {
     }
 
     printf("=====================================\n");
-    printf("  murmfrodo4 - C64 Emulator (Frodo4)\n");
+    printf("  MurmC64 - C64 Emulator (Frodo4)\n");
     printf("  RP2350 Port\n");
     printf("=====================================\n");
     printf("Board variant: %s\n",

@@ -85,7 +85,7 @@ static const char *error_messages[] = {
     "70,NO CHANNEL,%02d,%02d\r",
     "71,DIR ERROR,%02d,%02d\r",
     "72,DISK FULL,%02d,%02d\r",
-    "73,MURMFRODO4 VIRTUAL 1541,%02d,%02d\r",
+    "73,MURMC64 VIRTUAL 1541,%02d,%02d\r",
     "74,DRIVE NOT READY,%02d,%02d\r"
 };
 
