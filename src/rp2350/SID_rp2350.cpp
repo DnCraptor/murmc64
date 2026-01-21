@@ -734,18 +734,21 @@ int16_t DigitalRenderer::calc_single_sample()
         sum_output_filter += (int32_t)((float)sum_input_filter - hp_state);
     }
 
-    // DC offset for 6581
-    const int32_t dc_offset = is6581 ? 0x800000 : 0x100000;
-
     // Mix and apply master volume
-    int32_t output = (sum_output + sum_output_filter + dc_offset) * master_volume;
-    output = output >> 14;
+    // Scale down to prevent clipping (>> 16 instead of >> 14)
+    int32_t output = (sum_output + sum_output_filter) * master_volume;
+    output = output >> 16;
 
-    // Clamp
-    if (output > 0x7fff) {
-        output = 0x7fff;
-    } else if (output < -0x8000) {
-        output = -0x8000;
+    // Add small DC offset for 6581 (after volume scaling)
+    if (is6581) {
+        output += 128;
+    }
+
+    // Clamp to 16-bit range
+    if (output > 32767) {
+        output = 32767;
+    } else if (output < -32768) {
+        output = -32768;
     }
 
     return (int16_t)output;
