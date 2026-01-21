@@ -138,11 +138,10 @@ add_executable(${BUILD_NAME}
     src/VIA.cpp
 )
 
-# MOS2 support: use different linker script for Murmulator OS
+# MOS2 support: use custom linker script only for Murmulator OS builds
+# Non-MOS2 builds use the default Pico SDK linker script
 if(MOS2)
     pico_set_linker_script(${BUILD_NAME} "${CMAKE_SOURCE_DIR}/memmap.mos2.ld")
-else()
-    pico_set_linker_script(${BUILD_NAME} "${CMAKE_SOURCE_DIR}/memmap.ld")
 endif()
 
 # Frodo Lite (line-based) vs Frodo SC (cycle-accurate) emulation
