@@ -1,8 +1,16 @@
 /*
- * fatfs_stdio.h - FatFS wrapper for stdio file operations
+ *  fatfs_stdio.h - FatFS wrapper for stdio file operations
  *
- * This provides a thin wrapper around FatFS to make stdio-based code work
- * on RP2350. It maps fopen/fread/fwrite/fseek/ftell/fclose to FatFS equivalents.
+ *  MurmC64 - Commodore 64 Emulator for RP2350
+ *  Copyright (c) 2024-2026 Mikhail Matveev <xtreme@rh1.tech>
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
+ *
+ *  Provides a thin wrapper around FatFS to make stdio-based code work
+ *  on RP2350. Maps fopen/fread/fwrite/fseek/ftell/fclose to FatFS equivalents.
  */
 
 #ifndef FATFS_STDIO_H

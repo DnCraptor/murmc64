@@ -226,5 +226,7 @@ Mikhail Matveev <<xtreme@rh1.tech>>
 ## Acknowledgments
 
 - Christian Bauer for the original Frodo C64 emulator
+- [xrip](https://github.com/xrip) and [DnCraptor](https://github.com/dncraptor/) for drivers and code contributions
+- The [Murmulator community](https://murmulator.ru) for hardware designs and software support
 - The Raspberry Pi foundation for the RP2350 and Pico SDK
 - The Commodore 64 community for preserving this classic platform
