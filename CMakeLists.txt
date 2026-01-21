@@ -6,6 +6,12 @@ set(PICO_BOARD pico2 CACHE STRING "Pico board type")
 # Board configuration variant (M1, M2)
 set(BOARD_VARIANT "M1" CACHE STRING "Board variant: M1 or M2")
 
+# MOS2 support (generate .m1p2 or .m2p2 for Murmulator OS instead of .uf2)
+option(MOS2 "Build for Murmulator OS (m1p2/m2p2 format)" OFF)
+
+# Build name - will be modified based on MOS2 setting
+set(BUILD_NAME "murmc64")
+
 # CPU overclock configuration (252, 378, 504 MHz)
 set(CPU_SPEED "252" CACHE STRING "CPU clock in MHz: 252, 378, 504")
 
@@ -52,13 +58,23 @@ message(STATUS "I2S Audio: DATA=${I2S_DATA_PIN}, CLK_BASE=${I2S_CLOCK_PIN_BASE}"
 
 include(pico_sdk_import.cmake)
 
+# MOS2 support: modify build name for Murmulator OS format
+if(MOS2)
+    if(BOARD_VARIANT STREQUAL "M2")
+        set(BUILD_NAME "murmc64.m2p2")
+    else()
+        set(BUILD_NAME "murmc64.m1p2")
+    endif()
+    message(STATUS "Building for Murmulator OS: ${BUILD_NAME}")
+endif()
+
 # Import pico-extras for audio_i2s library
 set(PICO_EXTRAS_PATH ${CMAKE_CURRENT_LIST_DIR}/pico-extras CACHE PATH "Path to pico-extras")
 if(EXISTS ${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
     include(${PICO_EXTRAS_PATH}/external/pico_extras_import.cmake)
 endif()
 
-project(murmc64 C CXX ASM)
+project(${BUILD_NAME} C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 
@@ -90,7 +106,7 @@ target_compile_definitions(drivers PRIVATE
 target_link_libraries(drivers pico_stdlib hardware_dma hardware_pio hardware_spi)
 
 # Frodo4 C64 Emulator sources
-add_executable(murmc64
+add_executable(${BUILD_NAME}
     # RP2350 Platform layer
     src/rp2350/main_rp2350.c
     src/rp2350/Display_rp2350.cpp
@@ -122,21 +138,28 @@ add_executable(murmc64
     src/VIA.cpp
 )
 
+# MOS2 support: use different linker script for Murmulator OS
+if(MOS2)
+    pico_set_linker_script(${BUILD_NAME} "${CMAKE_SOURCE_DIR}/memmap.mos2.ld")
+else()
+    pico_set_linker_script(${BUILD_NAME} "${CMAKE_SOURCE_DIR}/memmap.ld")
+endif()
+
 # Frodo Lite (line-based) vs Frodo SC (cycle-accurate) emulation
 if(FRODO_LITE)
     message(STATUS "Using Frodo Lite (line-based emulation)")
 else()
     message(STATUS "Using Frodo SC (subcycle-accurate emulation)")
-    target_compile_definitions(murmc64 PRIVATE FRODO_SC=1)
+    target_compile_definitions(${BUILD_NAME} PRIVATE FRODO_SC=1)
 endif()
 
-target_include_directories(murmc64 PRIVATE
+target_include_directories(${BUILD_NAME} PRIVATE
     src
     src/rp2350
     drivers
 )
 
-target_compile_definitions(murmc64 PRIVATE
+target_compile_definitions(${BUILD_NAME} PRIVATE
     BOARD_${BOARD_VARIANT}
     CPU_CLOCK_MHZ=${CPU_SPEED}
     CPU_VOLTAGE=${CPU_VOLTAGE}
@@ -158,22 +181,22 @@ target_compile_definitions(murmc64 PRIVATE
 )
 
 if(PS2_KEYBOARD_ENABLED)
-    target_compile_definitions(murmc64 PRIVATE ENABLE_PS2_KEYBOARD=1)
+    target_compile_definitions(${BUILD_NAME} PRIVATE ENABLE_PS2_KEYBOARD=1)
 else()
-    target_compile_definitions(murmc64 PRIVATE ENABLE_PS2_KEYBOARD=0)
+    target_compile_definitions(${BUILD_NAME} PRIVATE ENABLE_PS2_KEYBOARD=0)
 endif()
 
 if(DEBUG_LOGS_ENABLED)
-    target_compile_definitions(murmc64 PRIVATE ENABLE_DEBUG_LOGS=1)
+    target_compile_definitions(${BUILD_NAME} PRIVATE ENABLE_DEBUG_LOGS=1)
 else()
-    target_compile_definitions(murmc64 PRIVATE ENABLE_DEBUG_LOGS=0)
+    target_compile_definitions(${BUILD_NAME} PRIVATE ENABLE_DEBUG_LOGS=0)
 endif()
 
 # Optimization for maximum performance on RP2350
 # -O3: Maximum optimization including loop vectorization
 # -ffunction-sections -fdata-sections: Allow linker to remove unused code
 # -fno-strict-aliasing: Allow type punning (common in emulators)
-target_compile_options(murmc64 PRIVATE
+target_compile_options(${BUILD_NAME} PRIVATE
     -O3
     -ffunction-sections
     -fdata-sections
@@ -182,7 +205,7 @@ target_compile_options(murmc64 PRIVATE
     -fno-rtti
 )
 
-target_link_libraries(murmc64
+target_link_libraries(${BUILD_NAME}
     pico_stdlib
     pico_multicore
     pico_audio_i2s
@@ -201,15 +224,15 @@ target_link_libraries(murmc64
 # USB CDC stdio: enabled for debugging, but disabled when USB HID is enabled
 # (USB port can only be Host OR Device, not both)
 if(USB_HID_ENABLED)
-    pico_enable_stdio_usb(murmc64 0)
+    pico_enable_stdio_usb(${BUILD_NAME} 0)
     message(STATUS "USB CDC stdio disabled (USB HID Host is enabled)")
 else()
-    pico_enable_stdio_usb(murmc64 1)
+    pico_enable_stdio_usb(${BUILD_NAME} 1)
     # NOTE: Do NOT explicitly link tinyusb_device - pico_enable_stdio_usb handles it
     # Explicit linking causes "CDC not enabled" warning and breaks USB Serial!
     message(STATUS "USB CDC stdio ENABLED (USB HID Host is disabled)")
 endif()
-pico_enable_stdio_uart(murmc64 1)
+pico_enable_stdio_uart(${BUILD_NAME} 1)
 
 # Create UF2 output
-pico_add_extra_outputs(murmc64)
+pico_add_extra_outputs(${BUILD_NAME})

@@ -22,6 +22,7 @@ Both boards provide all necessary peripherals out of the box—no additional wir
 - PS/2 and USB keyboard input
 - NES/SNES gamepad support (directly and via USB)
 - I2S audio output with SID emulation
+- [Murmulator OS 2](https://murmulator.ru) support (m1p2/m2p2 firmware format)
 
 ## Hardware Requirements
 
@@ -121,13 +122,23 @@ To build all 6 variants (M1/M2 × 3 speeds) with version numbering and USB HID e
 ./release.sh
 ```
 
-This creates versioned UF2 files in the `release/` directory:
+This creates versioned firmware files in the `release/` directory:
+
+**UF2 files** (for direct flashing via BOOTSEL):
 - `murmc64_m1_252_100_X_XX.uf2`
 - `murmc64_m1_378_133_X_XX.uf2`
 - `murmc64_m1_504_166_X_XX.uf2`
 - `murmc64_m2_252_100_X_XX.uf2`
 - `murmc64_m2_378_133_X_XX.uf2`
 - `murmc64_m2_504_166_X_XX.uf2`
+
+**MOS2 files** (for Murmulator OS):
+- `murmc64_m1_252_100_X_XX.m1p2`
+- `murmc64_m1_378_133_X_XX.m1p2`
+- `murmc64_m1_504_166_X_XX.m1p2`
+- `murmc64_m2_252_100_X_XX.m2p2`
+- `murmc64_m2_378_133_X_XX.m2p2`
+- `murmc64_m2_504_166_X_XX.m2p2`
 
 Speed presets:
 - 252 MHz CPU → 100 MHz PSRAM (no overclock)
