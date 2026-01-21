@@ -247,10 +247,11 @@ static inline uint get_psram_pin(void) {
 #define SID_SAMPLE_RATE     44100
 
 // Audio buffer size in samples (per channel)
-// At 44100 Hz, 1024 samples = ~23ms latency
-#define SID_BUFFER_SAMPLES  1024
+// At 44100 Hz, 512 samples = ~12ms latency (increased for stability)
+// Smaller buffers = less latency but more CPU pressure
+#define SID_BUFFER_SAMPLES  512
 
-// Number of audio buffers for double/triple buffering
-#define SID_BUFFER_COUNT    3
+// Number of audio buffers for triple buffering (helps prevent underruns)
+#define SID_BUFFER_COUNT    4
 
 #endif // BOARD_CONFIG_H

@@ -9,8 +9,7 @@
  *  the Free Software Foundation; either version 2 of the License, or
  *  (at your option) any later version.
  *
- *  Stub implementation that outputs silence or test tones.
- *  Full SID emulation requires integrating the Frodo4 SID core.
+ *  Uses the murmgenesis audio driver (double-buffered DMA ping-pong).
  */
 
 #include "../board_config.h"
@@ -18,13 +17,8 @@
 extern "C" {
 #include "debug_log.h"
 #include "pico/stdlib.h"
-#include "hardware/gpio.h"
-#include "hardware/clocks.h"
-
-// pico_audio_i2s from pico-extras
-#define none pico_audio_enum_none
-#include "pico/audio_i2s.h"
-#undef none
+#include "hardware/sync.h"
+#include "audio.h"
 }
 
 #include <cstring>
@@ -34,82 +28,34 @@ extern "C" {
 // Configuration
 //=============================================================================
 
-// Audio buffer configuration - use board_config.h defaults if not defined
-#ifndef SID_SAMPLE_RATE
-#define SID_SAMPLE_RATE     44100
-#endif
-#ifndef SID_BUFFER_SAMPLES
-#define SID_BUFFER_SAMPLES  256
-#endif
-#ifndef SID_BUFFER_COUNT
-#define SID_BUFFER_COUNT    4
-#endif
+// Ring buffer for SID samples - large enough for smooth playback
+#define SID_RING_BUFFER_SIZE 4096
 
-// I2S pin configuration (from CMake defines)
-#ifndef PICO_AUDIO_I2S_DATA_PIN
-#ifdef BOARD_M1
-#define PICO_AUDIO_I2S_DATA_PIN 26
-#else
-#define PICO_AUDIO_I2S_DATA_PIN 9
-#endif
-#endif
-
-#ifndef PICO_AUDIO_I2S_CLOCK_PIN_BASE
-#ifdef BOARD_M1
-#define PICO_AUDIO_I2S_CLOCK_PIN_BASE 27
-#else
-#define PICO_AUDIO_I2S_CLOCK_PIN_BASE 10
-#endif
-#endif
-
-#ifndef PICO_AUDIO_I2S_PIO
-#define PICO_AUDIO_I2S_PIO 0
-#endif
-
-#ifndef PICO_AUDIO_I2S_DMA_CHANNEL
-#define PICO_AUDIO_I2S_DMA_CHANNEL 6
-#endif
-
-#ifndef PICO_AUDIO_I2S_STATE_MACHINE
-#define PICO_AUDIO_I2S_STATE_MACHINE 2
-#endif
+// Target samples per frame (PAL: 50Hz, NTSC: 60Hz)
+// At 44100 Hz: PAL = 882 samples/frame, NTSC = 735 samples/frame
+#define TARGET_SAMPLES_PAL   882
+#define TARGET_SAMPLES_NTSC  735
 
 //=============================================================================
 // I2S Audio State
 //=============================================================================
 
-// Ring buffer for SID samples
-#define SID_RING_BUFFER_SIZE 2048
-
 static struct {
     bool initialized;
-
-    // Audio buffer pool
-    struct audio_buffer_pool *producer_pool;
 
     // Ring buffer for samples from SID emulation
     int16_t ring_buffer[SID_RING_BUFFER_SIZE * 2];  // Stereo
     volatile uint32_t write_index;
     volatile uint32_t read_index;
 
-    // Test tone state (for debugging)
-    uint32_t phase;
-    uint32_t phase_inc;
+    // Last sample for crossfade (to prevent clicks)
+    int16_t last_left;
+    int16_t last_right;
 
 } audio_state;
 
-// Audio format configuration (C++ compatible initialization)
-static struct audio_format audio_format_config;
-static struct audio_buffer_format producer_format_config;
-
-static void init_audio_formats(void) {
-    audio_format_config.format = AUDIO_BUFFER_FORMAT_PCM_S16;
-    audio_format_config.sample_freq = SID_SAMPLE_RATE;
-    audio_format_config.channel_count = 2;
-
-    producer_format_config.format = &audio_format_config;
-    producer_format_config.sample_stride = 4;  // 2 channels * 2 bytes per sample
-}
+// Mixed buffer for output to I2S
+static int16_t __attribute__((aligned(4))) mixed_buffer[AUDIO_BUFFER_SAMPLES * 2];
 
 //=============================================================================
 // I2S Audio Functions
@@ -125,56 +71,14 @@ void sid_i2s_init(void)
 
     memset(&audio_state, 0, sizeof(audio_state));
 
-    // Initialize audio format structs
-    init_audio_formats();
-
-    // Set test tone frequency (440 Hz A4)
-    audio_state.phase_inc = (uint32_t)((440.0f / SID_SAMPLE_RATE) * 65536.0f);
-
-    // Create audio buffer pool
-    audio_state.producer_pool = audio_new_producer_pool(
-        &producer_format_config,
-        SID_BUFFER_COUNT,
-        SID_BUFFER_SAMPLES
-    );
-
-    if (!audio_state.producer_pool) {
-        MII_DEBUG_PRINTF("sid_i2s_init: failed to create producer pool\n");
+    // Initialize the murmgenesis audio driver
+    if (!audio_init()) {
+        MII_DEBUG_PRINTF("sid_i2s_init: audio_init failed\n");
         return;
     }
-
-    // Configure I2S pins (C++ compatible initialization)
-    struct audio_i2s_config config;
-    memset(&config, 0, sizeof(config));
-    config.data_pin = PICO_AUDIO_I2S_DATA_PIN;
-    config.clock_pin_base = PICO_AUDIO_I2S_CLOCK_PIN_BASE;
-    config.dma_channel = PICO_AUDIO_I2S_DMA_CHANNEL;
-    config.pio_sm = PICO_AUDIO_I2S_STATE_MACHINE;
-
-    // Setup I2S audio
-    const struct audio_format *output_format = audio_i2s_setup(&audio_format_config, &config);
-    if (!output_format) {
-        MII_DEBUG_PRINTF("sid_i2s_init: audio_i2s_setup failed\n");
-        return;
-    }
-
-    // Increase GPIO drive strength for I2S signals
-    gpio_set_drive_strength(PICO_AUDIO_I2S_DATA_PIN, GPIO_DRIVE_STRENGTH_12MA);
-    gpio_set_drive_strength(PICO_AUDIO_I2S_CLOCK_PIN_BASE, GPIO_DRIVE_STRENGTH_12MA);
-    gpio_set_drive_strength(PICO_AUDIO_I2S_CLOCK_PIN_BASE + 1, GPIO_DRIVE_STRENGTH_12MA);
-
-    // Connect producer pool to I2S
-    bool ok = audio_i2s_connect_extra(audio_state.producer_pool, false, 0, 0, NULL);
-    if (!ok) {
-        MII_DEBUG_PRINTF("sid_i2s_init: audio_i2s_connect_extra failed\n");
-        return;
-    }
-
-    // Enable I2S
-    audio_i2s_set_enabled(true);
 
     audio_state.initialized = true;
-    MII_DEBUG_PRINTF("SID I2S audio initialized (stub - silence/test tone)\n");
+    MII_DEBUG_PRINTF("SID I2S audio initialized (murmgenesis driver)\n");
 }
 
 void sid_i2s_update(void)
@@ -183,38 +87,60 @@ void sid_i2s_update(void)
         return;
     }
 
-    // Transfer samples from ring buffer to I2S
-    audio_buffer_t *buffer;
+    // Memory barrier to ensure we see latest write_index
+    __dmb();
 
-    while ((buffer = take_audio_buffer(audio_state.producer_pool, false)) != NULL) {
-        int16_t *samples = (int16_t *)buffer->buffer->bytes;
-        int sample_count = buffer->max_sample_count;
+    // Calculate how many samples are available in ring buffer
+    uint32_t read_idx = audio_state.read_index;
+    uint32_t write_idx = audio_state.write_index;
+    int32_t available = (int32_t)(write_idx - read_idx);
+    if (available < 0) available = 0;
 
-        for (int i = 0; i < sample_count; i++) {
-            int16_t left = 0;
-            int16_t right = 0;
+    // Target samples per frame (use PAL timing for C64)
+    int target_samples = TARGET_SAMPLES_PAL;
 
-            // Read from ring buffer if samples available
-            uint32_t read_idx = audio_state.read_index;
-            uint32_t write_idx = audio_state.write_index;
+    // Fill output buffer from ring buffer
+    for (int i = 0; i < target_samples; i++) {
+        int16_t left = 0;
+        int16_t right = 0;
 
-            if (read_idx != write_idx) {
-                // Samples available
-                uint32_t buf_idx = (read_idx % SID_RING_BUFFER_SIZE) * 2;
-                left = audio_state.ring_buffer[buf_idx];
-                right = audio_state.ring_buffer[buf_idx + 1];
-                audio_state.read_index = read_idx + 1;
+        if (available > 0) {
+            // Read from ring buffer
+            uint32_t buf_idx = (read_idx & (SID_RING_BUFFER_SIZE - 1)) * 2;
+            left = audio_state.ring_buffer[buf_idx];
+            right = audio_state.ring_buffer[buf_idx + 1];
+            read_idx++;
+            available--;
+
+            // Crossfade from last sample at start of buffer
+            if (i < 16) {
+                int fade_in = (i * 256) / 16;
+                int fade_out = 256 - fade_in;
+                left = (int16_t)((left * fade_in + audio_state.last_left * fade_out) >> 8);
+                right = (int16_t)((right * fade_in + audio_state.last_right * fade_out) >> 8);
             }
-            // else: buffer underrun, output silence
-
-            // Stereo output
-            samples[i * 2] = left;
-            samples[i * 2 + 1] = right;
+        } else {
+            // Buffer underrun: fade to silence
+            left = (audio_state.last_left * 240) >> 8;
+            right = (audio_state.last_right * 240) >> 8;
         }
 
-        buffer->sample_count = sample_count;
-        give_audio_buffer(audio_state.producer_pool, buffer);
+        // Update last sample
+        audio_state.last_left = left;
+        audio_state.last_right = right;
+
+        // Write to output buffer (stereo interleaved)
+        mixed_buffer[i * 2] = left;
+        mixed_buffer[i * 2 + 1] = right;
     }
+
+    // Update read index
+    __dmb();
+    audio_state.read_index = read_idx;
+
+    // Submit to I2S DMA
+    i2s_config_t *config = audio_get_i2s_config();
+    i2s_dma_write_count(config, mixed_buffer, target_samples);
 }
 
 // Add samples to the SID ring buffer (called from SID emulation)
@@ -227,11 +153,16 @@ void sid_add_sample(int16_t left, int16_t right)
     uint32_t write_idx = audio_state.write_index;
     uint32_t read_idx = audio_state.read_index;
 
-    // Check for buffer full (leave one slot empty)
-    if (((write_idx + 1) % SID_RING_BUFFER_SIZE) != (read_idx % SID_RING_BUFFER_SIZE)) {
-        uint32_t buf_idx = (write_idx % SID_RING_BUFFER_SIZE) * 2;
+    // Calculate available space (with wrap-around)
+    uint32_t available = SID_RING_BUFFER_SIZE - ((write_idx - read_idx) & (SID_RING_BUFFER_SIZE - 1)) - 1;
+
+    if (available > 0) {
+        uint32_t buf_idx = (write_idx & (SID_RING_BUFFER_SIZE - 1)) * 2;
         audio_state.ring_buffer[buf_idx] = left;
         audio_state.ring_buffer[buf_idx + 1] = right;
+
+        // Memory barrier before updating write index
+        __dmb();
         audio_state.write_index = write_idx + 1;
     }
     // else: buffer full, drop sample
@@ -241,7 +172,7 @@ void sid_add_sample(int16_t left, int16_t right)
 int sid_get_buffer_fill(void)
 {
     int32_t fill = (int32_t)(audio_state.write_index - audio_state.read_index);
-    if (fill < 0) fill += SID_RING_BUFFER_SIZE;
+    if (fill < 0) fill = 0;
     return (int)fill;
 }
 

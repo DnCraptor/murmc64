@@ -97,13 +97,25 @@ add_library(drivers
     drivers/psram_init.c
     drivers/psram_allocator.c
     drivers/nespad/nespad.c
+    drivers/audio.c
 )
-target_include_directories(drivers PUBLIC drivers drivers/nespad src)
+
+# Generate PIO header for audio I2S (must be after add_library)
+pico_generate_pio_header(drivers ${CMAKE_CURRENT_LIST_DIR}/drivers/audio_i2s.pio)
+
+target_include_directories(drivers PUBLIC drivers drivers/nespad src ${CMAKE_CURRENT_BINARY_DIR})
 target_compile_definitions(drivers PRIVATE
     BOARD_${BOARD_VARIANT}
     PSRAM_MAX_FREQ_MHZ=${PSRAM_SPEED}
+    I2S_DATA_PIN=${I2S_DATA_PIN}
+    I2S_CLOCK_PIN_BASE=${I2S_CLOCK_PIN_BASE}
 )
-target_link_libraries(drivers pico_stdlib hardware_dma hardware_pio hardware_spi)
+if(DEBUG_LOGS_ENABLED)
+    target_compile_definitions(drivers PRIVATE ENABLE_DEBUG_LOGS=1)
+else()
+    target_compile_definitions(drivers PRIVATE ENABLE_DEBUG_LOGS=0)
+endif()
+target_link_libraries(drivers pico_stdlib hardware_dma hardware_pio hardware_spi hardware_clocks hardware_irq)
 
 # Frodo4 C64 Emulator sources
 add_executable(${BUILD_NAME}
@@ -207,7 +219,6 @@ target_compile_options(${BUILD_NAME} PRIVATE
 target_link_libraries(${BUILD_NAME}
     pico_stdlib
     pico_multicore
-    pico_audio_i2s
     hardware_dma
     hardware_pio
     hardware_clocks
