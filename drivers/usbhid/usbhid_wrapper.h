@@ -66,6 +66,12 @@ uint8_t usbhid_wrapper_get_modifiers(void);
 bool usbhid_wrapper_is_reset_combo(void);
 
 /**
+ * Get current arrow key state for joystick emulation
+ * @return Arrow state bits: 0=right, 1=left, 2=down, 3=up
+ */
+uint8_t usbhid_wrapper_get_arrow_state(void);
+
+/**
  * Get USB gamepad button state in NES-style format
  * Compatible with nespad_state format for easy merging
  * @return Button state bits (DPAD_UP, DPAD_DOWN, etc.)
@@ -82,6 +88,7 @@ static inline int usbhid_wrapper_gamepad_connected(void) { return 0; }
 static inline int usbhid_wrapper_get_key(int *pressed, unsigned char *key) { (void)pressed; (void)key; return 0; }
 static inline uint8_t usbhid_wrapper_get_modifiers(void) { return 0; }
 static inline bool usbhid_wrapper_is_reset_combo(void) { return false; }
+static inline uint8_t usbhid_wrapper_get_arrow_state(void) { return 0; }
 static inline uint32_t usbhid_wrapper_get_gamepad_state(void) { return 0; }
 
 #endif // USB_HID_ENABLED
