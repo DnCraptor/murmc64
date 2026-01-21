@@ -867,6 +867,23 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     }
 #endif
 
+#ifdef USB_HID_ENABLED
+    // USB keyboard joystick emulation (same logic as PS/2)
+    if (!disk_ui_is_visible()) {
+        // Arrow keys: usbhid_wrapper_get_arrow_state() returns bits: 0=right, 1=left, 2=down, 3=up
+        uint8_t arrows = usbhid_wrapper_get_arrow_state();
+        uint8_t mods = usbhid_wrapper_get_modifiers();
+
+        if (arrows & 0x08) gamepad1_joy &= ~0x01;  // Up (bit 3)
+        if (arrows & 0x04) gamepad1_joy &= ~0x02;  // Down (bit 2)
+        if (arrows & 0x02) gamepad1_joy &= ~0x04;  // Left (bit 1)
+        if (arrows & 0x01) gamepad1_joy &= ~0x08;  // Right (bit 0)
+
+        // R-Ctrl (0x10) or R-Alt (0x40) for fire button
+        if (mods & 0x50) gamepad1_joy &= ~0x10;  // R-Ctrl=0x10, R-Alt=0x40
+    }
+#endif
+
     // Apply gamepad swap (F9 toggles joy_port between 1 and 2)
     // joy_port == 2 (default): Gamepad1 -> Port2 (Joystick2), Gamepad2 -> Port1 (Joystick1)
     // joy_port == 1 (swapped): Gamepad1 -> Port1 (Joystick1), Gamepad2 -> Port2 (Joystick2)

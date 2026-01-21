@@ -1,12 +1,10 @@
 #!/bin/bash
 # Copyright (c) 2024-2026 Mikhail Matveev <xtreme@rh1.tech>
 #
-# release.sh - Build all release variants of MurmC64
+# release.sh - Build release variants of MurmC64
 #
-# Creates firmware files for each board variant (M1, M2) at each clock speed:
-#   - Non-overclocked: 252 MHz CPU, 100 MHz PSRAM
-#   - Medium overclock: 378 MHz CPU, 133 MHz PSRAM
-#   - Max overclock: 504 MHz CPU, 166 MHz PSRAM
+# Creates firmware files for each board variant (M1, M2):
+#   - 252 MHz CPU, 133 MHz PSRAM (stable configuration)
 #
 # Output formats:
 #   - UF2 files for direct flashing via BOOTSEL mode
@@ -16,10 +14,8 @@
 # PS/2 keyboard and NES gamepad are also supported simultaneously.
 # USB Serial debug output is DISABLED in release builds.
 #
-# Output format: murmc64_mX_Y_Z_A_BB.{uf2,m1p2,m2p2}
+# Output format: murmc64_mX_A_BB.{uf2,m1p2,m2p2}
 #   X  = Board variant (1 or 2)
-#   Y  = CPU clock in MHz
-#   Z  = PSRAM clock in MHz (target)
 #   A  = Major version
 #   BB = Minor version (zero-padded)
 #
@@ -105,12 +101,8 @@ mkdir -p "$RELEASE_DIR"
 
 # Build configurations: "BOARD CPU_SPEED PSRAM_SPEED DESCRIPTION"
 CONFIGS=(
-    "M1 252 100 non-overclocked"
-    "M1 378 133 medium-overclock"
-    "M1 504 166 max-overclock"
-    "M2 252 100 non-overclocked"
-    "M2 378 133 medium-overclock"
-    "M2 504 166 max-overclock"
+    "M1 252 133 stable"
+    "M2 252 133 stable"
 )
 
 BUILD_COUNT=0
@@ -136,8 +128,8 @@ for config in "${CONFIGS[@]}"; do
         BOARD_NUM=2
     fi
 
-    # Output filename
-    OUTPUT_NAME="murmc64_m${BOARD_NUM}_${CPU}_${PSRAM}_${VERSION}.uf2"
+    # Output filename (simplified - single speed configuration)
+    OUTPUT_NAME="murmc64_m${BOARD_NUM}_${VERSION}.uf2"
 
     echo ""
     echo -e "${CYAN}[$BUILD_COUNT/$TOTAL_BUILDS] Building: $OUTPUT_NAME${NC}"
@@ -193,8 +185,8 @@ for config in "${CONFIGS[@]}"; do
         MOS2_EXT="m2p2"
     fi
 
-    # Output filename for MOS2
-    OUTPUT_NAME="murmc64_m${BOARD_NUM}_${CPU}_${PSRAM}_${VERSION}.${MOS2_EXT}"
+    # Output filename for MOS2 (simplified - single speed configuration)
+    OUTPUT_NAME="murmc64_m${BOARD_NUM}_${VERSION}.${MOS2_EXT}"
 
     echo ""
     echo -e "${CYAN}[$BUILD_COUNT/$TOTAL_BUILDS] Building: $OUTPUT_NAME${NC}"
@@ -245,9 +237,9 @@ echo ""
 echo "Release files in: $RELEASE_DIR/"
 echo ""
 echo "UF2 files (for BOOTSEL flashing):"
-ls -la "$RELEASE_DIR"/murmc64_*_${VERSION}.uf2 2>/dev/null | awk '{print "  " $9 " (" $5 " bytes)"}'
+ls -la "$RELEASE_DIR"/murmc64_m?_${VERSION}.uf2 2>/dev/null | awk '{print "  " $9 " (" $5 " bytes)"}'
 echo ""
 echo "MOS2 files (for Murmulator OS):"
-ls -la "$RELEASE_DIR"/murmc64_*_${VERSION}.m?p2 2>/dev/null | awk '{print "  " $9 " (" $5 " bytes)"}'
+ls -la "$RELEASE_DIR"/murmc64_m?_${VERSION}.m?p2 2>/dev/null | awk '{print "  " $9 " (" $5 " bytes)"}'
 echo ""
 echo -e "Version: ${CYAN}${VERSION_DOT}${NC}"

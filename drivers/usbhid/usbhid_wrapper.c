@@ -17,6 +17,7 @@
 // Track Delete key state for reset combo
 static bool delete_key_pressed = false;
 static uint8_t current_modifiers = 0;
+static uint8_t current_arrow_state = 0;  // bits: 0=right, 1=left, 2=down, 3=up
 
 //--------------------------------------------------------------------
 // HID Keycode to Apple II ASCII Mapping
@@ -96,22 +97,39 @@ void usbhid_wrapper_init(void) {
     usbhid_init();
     current_modifiers = 0;
     delete_key_pressed = false;
+    current_arrow_state = 0;
 }
 
 void usbhid_wrapper_poll(void) {
     usbhid_task();
-    
+
     // Update current modifier and Delete key state from keyboard
     usbhid_keyboard_state_t kbd_state;
     usbhid_get_keyboard_state(&kbd_state);
     current_modifiers = kbd_state.modifier;
-    
-    // Check if Delete key (0x4C) is currently pressed
+
+    // Check special keys in current keycode slots
     delete_key_pressed = false;
+    current_arrow_state = 0;
+
     for (int i = 0; i < 6; i++) {
-        if (kbd_state.keycode[i] == 0x4C) {
+        uint8_t kc = kbd_state.keycode[i];
+        if (kc == 0x4C) {
             delete_key_pressed = true;
-            break;
+        }
+        // Arrow keys: HID 0x4F=Right, 0x50=Left, 0x51=Down, 0x52=Up
+        // Arrow state bits: 0=right, 1=left, 2=down, 3=up
+        else if (kc == 0x4F) {
+            current_arrow_state |= 0x01;  // Right
+        }
+        else if (kc == 0x50) {
+            current_arrow_state |= 0x02;  // Left
+        }
+        else if (kc == 0x51) {
+            current_arrow_state |= 0x04;  // Down
+        }
+        else if (kc == 0x52) {
+            current_arrow_state |= 0x08;  // Up
         }
     }
 }
@@ -153,6 +171,10 @@ bool usbhid_wrapper_is_reset_combo(void) {
     bool ctrl = (current_modifiers & 0x11) != 0;  // L/R Ctrl
     bool alt = (current_modifiers & 0x44) != 0;   // L/R Alt
     return ctrl && alt && delete_key_pressed;
+}
+
+uint8_t usbhid_wrapper_get_arrow_state(void) {
+    return current_arrow_state;
 }
 
 uint32_t usbhid_wrapper_get_gamepad_state(void) {

@@ -108,15 +108,15 @@ git submodule update --init --recursive
 # Build using the build script (development build with USB serial debug)
 ./build.sh
 
-# Or build manually with CMake
+# Or build manually with CMake (default: 252 MHz CPU, 133 MHz PSRAM)
 mkdir build && cd build
-cmake -DPICO_PLATFORM=rp2350 ..
+cmake -DPICO_PLATFORM=rp2350 -DCPU_SPEED=252 -DPSRAM_SPEED=133 ..
 make -j$(nproc)
 ```
 
 ### Release Builds
 
-To build all 6 variants (M1/M2 × 3 speeds) with version numbering and USB HID enabled:
+To build both board variants (M1/M2) with version numbering and USB HID enabled:
 
 ```bash
 ./release.sh
@@ -125,25 +125,14 @@ To build all 6 variants (M1/M2 × 3 speeds) with version numbering and USB HID e
 This creates versioned firmware files in the `release/` directory:
 
 **UF2 files** (for direct flashing via BOOTSEL):
-- `murmc64_m1_252_100_X_XX.uf2`
-- `murmc64_m1_378_133_X_XX.uf2`
-- `murmc64_m1_504_166_X_XX.uf2`
-- `murmc64_m2_252_100_X_XX.uf2`
-- `murmc64_m2_378_133_X_XX.uf2`
-- `murmc64_m2_504_166_X_XX.uf2`
+- `murmc64_m1_X_XX.uf2`
+- `murmc64_m2_X_XX.uf2`
 
 **MOS2 files** (for Murmulator OS):
-- `murmc64_m1_252_100_X_XX.m1p2`
-- `murmc64_m1_378_133_X_XX.m1p2`
-- `murmc64_m1_504_166_X_XX.m1p2`
-- `murmc64_m2_252_100_X_XX.m2p2`
-- `murmc64_m2_378_133_X_XX.m2p2`
-- `murmc64_m2_504_166_X_XX.m2p2`
+- `murmc64_m1_X_XX.m1p2`
+- `murmc64_m2_X_XX.m2p2`
 
-Speed presets:
-- 252 MHz CPU → 100 MHz PSRAM (no overclock)
-- 378 MHz CPU → 133 MHz PSRAM (medium overclock)
-- 504 MHz CPU → 166 MHz PSRAM (max overclock)
+Default configuration: 252 MHz CPU, 133 MHz PSRAM (stable, no overclock required).
 
 ### Flashing
 
