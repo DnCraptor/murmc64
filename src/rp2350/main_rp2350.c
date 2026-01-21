@@ -24,6 +24,7 @@
 #include "hardware/vreg.h"
 #include "hardware/gpio.h"
 #include "hardware/watchdog.h"
+#include "hardware/structs/qmi.h"
 
 // Drivers
 #include "HDMI.h"
@@ -147,22 +148,52 @@ static void core1_video_task(void) {
 // System Initialization
 //=============================================================================
 
-static void init_clocks(void) {
-    // Initialize USB stdio BEFORE overclocking!
-    // USB CDC needs the default 48MHz USB clock to enumerate properly.
-    stdio_init_all();
-    sleep_ms(100);  // Give USB time to enumerate at default clock
+// Flash timing configuration for overclocking
+#define FLASH_MAX_FREQ_MHZ 88
 
-    // Set voltage for the desired CPU speed
+static void __no_inline_not_in_flash_func(set_flash_timings)(int cpu_mhz) {
+    const int clock_hz = cpu_mhz * 1000000;
+    const int max_flash_freq = FLASH_MAX_FREQ_MHZ * 1000000;
+
+    int divisor = (clock_hz + max_flash_freq - (max_flash_freq >> 4) - 1) / max_flash_freq;
+    if (divisor == 1 && clock_hz >= 166000000) {
+        divisor = 2;
+    }
+
+    int rxdelay = divisor;
+    if (clock_hz / divisor > 100000000 && clock_hz >= 166000000) {
+        rxdelay += 1;
+    }
+
+    qmi_hw->m[0].timing = 0x60007000 |
+                        rxdelay << QMI_M0_TIMING_RXDELAY_LSB |
+                        divisor << QMI_M0_TIMING_CLKDIV_LSB;
+}
+
+static void init_clocks(void) {
+    // Overclock BEFORE stdio_init_all() - matching murmgenesis approach
+#if CPU_CLOCK_MHZ > 252
+    // Disable voltage limit for high voltages (>1.50V)
+    vreg_disable_voltage_limit();
     vreg_set_voltage(CPU_VOLTAGE);
-    sleep_ms(10);  // Let voltage stabilize
+    // Set flash timings before changing clock
+    set_flash_timings(CPU_CLOCK_MHZ);
+    sleep_ms(100);  // Let voltage stabilize (longer delay for high voltage)
+#endif
 
     // Set system clock
-    uint32_t target_freq = CPU_CLOCK_MHZ * 1000000;
-    set_sys_clock_khz(target_freq / 1000, true);
+    if (!set_sys_clock_khz(CPU_CLOCK_MHZ * 1000, false)) {
+        // Fallback to safe speed if requested speed fails
+        set_sys_clock_khz(252 * 1000, true);
+    }
 
-    MII_DEBUG_PRINTF("System clock: %lu MHz\n",
-                     (unsigned long)(clock_get_hz(clk_sys) / 1000000));
+    // Initialize stdio AFTER clock is stable
+    stdio_init_all();
+
+    // Startup delay for USB serial console
+    for (int i = 0; i < 8; i++) {
+        sleep_ms(500);
+    }
 }
 
 static void init_stdio(void) {
