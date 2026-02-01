@@ -13,8 +13,6 @@
 #include "stdlib.h"
 #include "HDMI.h"
 
-volatile int lock_y = -1;
-
 uint16_t pio_program_VGA_instructions[] = {
     //     .wrap_target
     0x6008, //  0: out    pins, 8
@@ -50,11 +48,6 @@ static volatile uint8_t *graphics_pending_buffer = NULL;
 
 static uint graphics_buffer_width = 0;
 static uint graphics_buffer_height = 0;
-static int graphics_buffer_shift_x = 0;
-static int graphics_buffer_shift_y = 0;
-
-static bool is_flash_line = false;
-static bool is_flash_frame = false;
 
 //буфер 1к графической палитры
 static uint16_t palette[2][256];
@@ -112,8 +105,7 @@ void __time_critical_func() dma_handler_VGA() {
         if (screen_line == N_lines_visible | screen_line == N_lines_visible + 3) {
             uint32_t* output_buffer_32bit = lines_pattern[2 + (screen_line & 1)];
             output_buffer_32bit += shift_picture / 4;
-            uint32_t p_i = (screen_line && is_flash_line) + (graphics_frame_count && is_flash_frame) & 1;
-            uint32_t color32 = bg_color[p_i];
+            uint32_t color32 = bg_color[0];
             for (int i = visible_line_size / 2; i--;) {
                 *output_buffer_32bit++ = color32;
             }
@@ -129,8 +121,8 @@ void __time_critical_func() dma_handler_VGA() {
 
     uint32_t* * output_buffer = &lines_pattern[2 + (screen_line & 1)];
     int line_number = screen_line / 2;
-    if (screen_line % 2) return;
-    int y = screen_line / 2 - graphics_buffer_shift_y;
+    if (screen_line & 1) return;
+    int y = screen_line >> 1;
 
     if (y < 0) {
         dma_channel_set_read_addr(dma_chan_ctrl, &lines_pattern[0], false); // TODO: ensue it is required
@@ -141,9 +133,7 @@ void __time_critical_func() dma_handler_VGA() {
         if (y == graphics_buffer_height | y == graphics_buffer_height + 1 |
             y == graphics_buffer_height + 2) {
             uint32_t* output_buffer_32bit = *output_buffer;
-            uint32_t p_i = ((line_number && is_flash_line) + (graphics_frame_count && is_flash_frame)) & 1;
-            uint32_t color32 = bg_color[p_i];
-
+            uint32_t color32 = bg_color[0];
             output_buffer_32bit += shift_picture / 4;
             for (int i = visible_line_size / 2; i--;) {
                 *output_buffer_32bit++ = color32;
@@ -158,33 +148,18 @@ void __time_critical_func() dma_handler_VGA() {
     register uint16_t* output_buffer_16bit = (uint16_t *)(*output_buffer);
     output_buffer_16bit += shift_picture / 2; //смещение началы вывода на размер синхросигнала
 
-    graphics_buffer_shift_x &= 0xfffffff2; //2bit buf
-
     //для div_factor 2
     uint max_width = graphics_buffer_width;
-    if (graphics_buffer_shift_x < 0) {
-        max_width += graphics_buffer_shift_x;
-    }
-    else {
-#define div_factor (2)
-        output_buffer_16bit += graphics_buffer_shift_x * 2 / div_factor;
-    }
-
-
-    int width = MIN((visible_line_size - ((graphics_buffer_shift_x > 0) ? (graphics_buffer_shift_x) : 0)), max_width);
-    if (width < 0) return; // TODO: detect a case
 
     // Индекс палитры в зависимости от настроек чередования строк и кадров
-    uint16_t* current_palette = palette[(y && is_flash_line) + (graphics_frame_count & is_flash_frame) & 1];
+    uint16_t* current_palette = palette[0];
 
-    //4bit buf
+    // 8-bit buf
     register uint8_t* input_buffer = graphics_get_buffer() + y * SCREEN_WIDTH;
-    lock_y = y;
-    for (register int x = width; x--;) {
+    for (register int x = SCREEN_WIDTH; x--;) {
         *output_buffer_16bit++ = current_palette[*input_buffer];
         input_buffer++;
     }
-    lock_y = -1;
     dma_channel_set_read_addr(dma_chan_ctrl, output_buffer, false);
 }
 
@@ -274,16 +249,6 @@ void graphics_set_mode() {
 void graphics_set_res(int width, int height) {
     graphics_buffer_width = width;
     graphics_buffer_height = height;
-}
-
-void graphics_set_offset(const int x, const int y) {
-    graphics_buffer_shift_x = x;
-    graphics_buffer_shift_y = y;
-}
-
-void graphics_set_flashmode(const bool flash_line, const bool flash_frame) {
-    is_flash_frame = flash_frame;
-    is_flash_line = flash_line;
 }
 
 void graphics_set_bgcolor(const uint32_t color888) {
