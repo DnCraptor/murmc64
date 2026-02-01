@@ -1,22 +1,59 @@
+# == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
+if(WIN32)
+    set(USERHOME $ENV{USERPROFILE})
+else()
+    set(USERHOME $ENV{HOME})
+endif()
+set(sdkVersion 2.2.0)
+set(toolchainVersion 14_2_Rel1)
+set(picotoolVersion 2.2.0)
+set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
+if (EXISTS ${picoVscode})
+    include(${picoVscode})
+endif()
+# ====================================================================================
 cmake_minimum_required(VERSION 3.13)
-
-# Set board to Pico 2 (RP2350)
-set(PICO_BOARD pico2 CACHE STRING "Pico board type")
-
-# Board configuration variant (M1, M2)
-set(BOARD_VARIANT "M1" CACHE STRING "Board variant: M1 or M2")
-
-# MOS2 support (generate .m1p2 or .m2p2 for Murmulator OS instead of .uf2)
-option(MOS2 "Build for Murmulator OS (m1p2/m2p2 format)" OFF)
 
 # Build name - will be modified based on MOS2 setting
 set(BUILD_NAME "murmc64")
 
+# Set board to Pico 2 (RP2350)
+set(PICO_BOARD pico2 CACHE STRING "Pico board type")
+
+set(BUILD_VERSION "1.0.2")
+
+# Board configuration variant (M1, M2)
+set(BOARD_VARIANT "M1" CACHE STRING "Board variant: M1 or M2")
+
+set(VIDEO_TYPE "VGA" CACHE STRING "Video output: HDMI or VGA")
+
+# Audio output configuration (I2S or PWM)
+set(AUDIO_TYPE "I2S" CACHE STRING "Audio output: I2S or PWM")
+
+# MOS2 support (generate .m1p2 or .m2p2 for Murmulator OS instead of .uf2)
+option(MOS2 "Build for Murmulator OS (m1p2/m2p2 format)" OFF)
+
 # CPU overclock configuration (252, 378, 504 MHz)
-set(CPU_SPEED "252" CACHE STRING "CPU clock in MHz: 252, 378, 504")
+set(CPU_SPEED "378" CACHE STRING "CPU clock in MHz: 252, 378, 504")
 
 # PSRAM speed configuration (84, 100, 133, 166 MHz target)
-set(PSRAM_SPEED "133" CACHE STRING "PSRAM max frequency in MHz: 84, 100, 133, 166")
+set(PSRAM_SPEED "84" CACHE STRING "PSRAM max frequency in MHz: 84, 100, 133, 166")
+
+if(VIDEO_TYPE STREQUAL "HDMI")
+    set(VIDEO_HDMI ON)
+elseif(VIDEO_TYPE STREQUAL "VGA")
+    set(VIDEO_VGA ON)
+endif()
+
+IF(VIDEO_VGA)
+    SET(BUILD_NAME "${BUILD_NAME}-VGA")
+endif ()
+IF(VIDEO_HDMI)
+    SET(BUILD_NAME "${BUILD_NAME}-HDMI")
+endif ()
+
+SET(BUILD_NAME "${BUILD_NAME}-${CPU_SPEED}MHz")
+SET(BUILD_NAME "${BUILD_NAME}-${AUDIO_TYPE}-${BUILD_VERSION}")
 
 # CPU voltage selection based on speed
 if(CPU_SPEED GREATER_EQUAL 504)
@@ -58,15 +95,26 @@ message(STATUS "I2S Audio: DATA=${I2S_DATA_PIN}, CLK_BASE=${I2S_CLOCK_PIN_BASE}"
 
 include(pico_sdk_import.cmake)
 
+set(OUTPUT_DIR "${CMAKE_SOURCE_DIR}/bin/${CMAKE_BUILD_TYPE}")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${OUTPUT_DIR}")
+
 # MOS2 support: modify build name for Murmulator OS format
-if(MOS2)
-    if(BOARD_VARIANT STREQUAL "M2")
-        set(BUILD_NAME "murmc64.m2p2")
-    else()
-        set(BUILD_NAME "murmc64.m1p2")
-    endif()
+if (MOS2)
+    IF(BOARD_VARIANT STREQUAL "M2")
+        SET(BUILD_NAME "${BUILD_NAME}.m2p2")
+# TODO: support later
+#    ELSEIF(PICO_PC)
+#        SET(BUILD_NAME "${BUILD_NAME}.PCp2")
+#    ELSEIF(PICO_DV)
+#        SET(BUILD_NAME "${BUILD_NAME}.DVp2")
+#    ELSEIF(ZERO2)
+#        SET(BUILD_NAME "${BUILD_NAME}.z0p2")
+    ELSE()
+        SET(BUILD_NAME "${BUILD_NAME}.m1p2")
+    ENDIF()
     message(STATUS "Building for Murmulator OS: ${BUILD_NAME}")
-endif()
+endif ()
+
 
 # Import pico-extras for audio_i2s library
 set(PICO_EXTRAS_PATH ${CMAKE_CURRENT_LIST_DIR}/pico-extras CACHE PATH "Path to pico-extras")
@@ -91,14 +139,29 @@ add_subdirectory(drivers/fatfs)
 add_subdirectory(drivers/sdcard)
 add_subdirectory(drivers/usbhid)
 
-# Create a library for drivers
-add_library(drivers
-    drivers/HDMI.c
-    drivers/psram_init.c
-    drivers/psram_allocator.c
+# Collect driver sources based on configuration
+set(DRIVER_SOURCES
     drivers/nespad/nespad.c
     drivers/audio.c
 )
+
+if (PSRAM_SPEED)
+    list(APPEND DRIVER_SOURCES
+        drivers/psram_init.c
+        drivers/psram_allocator.c
+    )
+endif()
+
+if (VIDEO_HDMI)
+    list(APPEND DRIVER_SOURCES drivers/HDMI.c)
+endif()
+
+if (VIDEO_VGA)
+    list(APPEND DRIVER_SOURCES drivers/vga.c)
+endif()
+
+# Create a library for drivers
+add_library(drivers ${DRIVER_SOURCES})
 
 # Generate PIO header for audio I2S (must be after add_library)
 pico_generate_pio_header(drivers ${CMAKE_CURRENT_LIST_DIR}/drivers/audio_i2s.pio)
@@ -191,6 +254,19 @@ target_compile_definitions(${BUILD_NAME} PRIVATE
     FEATURE_AUDIO=1
 )
 
+if (VIDEO_HDMI)
+    target_compile_definitions(${BUILD_NAME} PRIVATE
+        VIDEO_HDMI
+        VIDEO=HDMI
+    )
+endif()
+if (VIDEO_VGA)
+    target_compile_definitions(${BUILD_NAME} PRIVATE
+        VIDEO_VGA
+        VIDEO=VGA
+    )
+endif()
+
 if(PS2_KEYBOARD_ENABLED)
     target_compile_definitions(${BUILD_NAME} PRIVATE ENABLE_PS2_KEYBOARD=1)
 else()
@@ -246,3 +322,14 @@ pico_enable_stdio_uart(${BUILD_NAME} 1)
 
 # Create UF2 output
 pico_add_extra_outputs(${BUILD_NAME})
+
+target_link_options(${BUILD_NAME} PRIVATE -Xlinker --print-memory-usage --data-sections)
+
+# MOS2 support:
+if (MOS2)
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rename
+        "${OUTPUT_DIR}/${BUILD_NAME}.uf2"
+        "${OUTPUT_DIR}/${BUILD_NAME}"
+    )
+endif ()

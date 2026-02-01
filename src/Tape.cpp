@@ -284,7 +284,12 @@ void Tape::close_image_file()
 	file_extended = false;
 }
 
-
+// W/A for RP2040/2350 to avoid link issues (newlib)
+__weak
+int _unlink(const char *name) {
+    errno = ENOSYS;
+    return -1;
+}
 /*
  *  Create new blank tape image file, returns false on error
  */
