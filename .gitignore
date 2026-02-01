@@ -41,3 +41,4 @@ generated/
 # Temporary files
 *.tmp
 *.bak
+bin/
