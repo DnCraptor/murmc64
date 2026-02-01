@@ -861,6 +861,10 @@ void c64_load_file(const char *filename)
     } else {
         MII_DEBUG_PRINTF("Unsupported file type: %s\n", ext);
     }
+    if (TheC64) {
+        TheC64->ResetAndAutoStart();
+        return;
+    }
 }
 
 /*
