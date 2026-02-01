@@ -37,7 +37,7 @@ void graphics_request_buffer_swap(uint8_t *buffer) {
     graphics_pending_buffer = buffer;
 }
 
-uint32_t hdmi_get_frame_count(void) {
+uint32_t get_frame_count(void) {
     return graphics_frame_count;
 }
 

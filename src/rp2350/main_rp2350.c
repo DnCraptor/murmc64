@@ -108,7 +108,9 @@ static void core1_video_task(void) {
 
     // Initialize HDMI IRQ handler on this core
     MII_DEBUG_PRINTF("Core 1: Calling graphics_init_irq_on_this_core()...\n");
-    graphics_init_irq_on_this_core();
+    #ifdef VIDEO_HDMI
+        graphics_init_irq_on_this_core();
+    #endif
     MII_DEBUG_PRINTF("Core 1: IRQ initialized\n");
 
     uint32_t last_frame_count = 0;
@@ -122,7 +124,7 @@ static void core1_video_task(void) {
         }
 
         // Wait for vsync (new frame)
-        uint32_t frame_count = hdmi_get_frame_count();
+        uint32_t frame_count = get_frame_count();
         if (frame_count == last_frame_count) {
             // No new frame yet, yield
             tight_loop_contents();
@@ -138,7 +140,9 @@ static void core1_video_task(void) {
         // When emulator finishes a frame, it swaps buffers
 
         // Periodically check HDMI health
+        #ifdef VIDEO_HDMI
         hdmi_check_and_restart();
+        #endif
     }
 
     MII_DEBUG_PRINTF("Core 1: Video task ending\n");
@@ -265,7 +269,9 @@ static void init_graphics(void) {
 
     // Defer IRQ setup to Core 1
     MII_DEBUG_PRINTF("  Setting defer IRQ to Core 1...\n");
+    #ifdef VIDEO_HDMI
     graphics_set_defer_irq_to_core1(true);
+    #endif
 
     // Initialize HDMI
     MII_DEBUG_PRINTF("  Calling graphics_init(g_out_HDMI)...\n");
@@ -542,6 +548,17 @@ int main(void) {
     // Initialize system clocks first
     init_clocks();
 
+#ifdef PICO_DEFAULT_LED_PIN
+    gpio_init(PICO_DEFAULT_LED_PIN);
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+    for (int i = 0; i < 6; i++) {
+        sleep_ms(33);
+        gpio_put(PICO_DEFAULT_LED_PIN, true);
+        sleep_ms(33);
+        gpio_put(PICO_DEFAULT_LED_PIN, false);
+    }
+#endif
+
     // Initialize stdio for debug output
     init_stdio();
 
@@ -609,3 +626,6 @@ static uint32_t rp2350_get_ticks_ms(void) {
 static uint64_t rp2350_get_ticks_us(void) {
     return to_us_since_boot(get_absolute_time());
 }
+
+__weak
+void _unlink(const char* n) {}
