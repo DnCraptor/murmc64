@@ -89,6 +89,11 @@ void graphics_request_buffer_swap(uint8_t *buffer) {
 void __scratch_x() vsync_handler() {
     // Called from DMA IRQ at frame boundary.
     graphics_frame_count++;
+    uint8_t *pending = (uint8_t *)graphics_pending_buffer;
+    if (pending) {
+        graphics_buffer = pending;
+        graphics_pending_buffer = NULL;
+    }
 }
 
 
