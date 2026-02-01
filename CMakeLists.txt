@@ -45,6 +45,12 @@ elseif(VIDEO_TYPE STREQUAL "VGA")
     set(VIDEO_VGA ON)
 endif()
 
+if(BOARD_VARIANT STREQUAL "M1")
+    SET(BUILD_NAME "m1p2-${BUILD_NAME}")
+else()  # M2
+    SET(BUILD_NAME "m2p2-${BUILD_NAME}")
+endif()
+
 IF(VIDEO_VGA)
     SET(BUILD_NAME "${BUILD_NAME}-VGA")
 endif ()
