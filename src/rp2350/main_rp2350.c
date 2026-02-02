@@ -295,7 +295,26 @@ static void init_graphics(void) {
 
 static void init_c64_palette(void) {
     MII_DEBUG_PRINTF("Setting C64 color palette...\n");
-
+#if 0
+    static const uint32_t c64_palette[16] = {
+        0x000000, // 0 Black        (0,0,0)
+        0xFCFCFC, // 1 White        (255→252)
+        0x542A2A, // 2 Red          (104→84, 55→42, 43→42)
+        0x5484A8, // 3 Cyan         (112→84, 164→168, 178→168)
+        0x542A84, // 4 Purple       (111→84, 61→42, 134→168)
+        0x548454, // 5 Green        (88→84, 141→168, 67→84)
+        0x2A2A84, // 6 Blue         (53→42, 40→42, 121→84)
+        0xA8A884, // 7 Yellow       (184→168, 199→168, 111→84)
+        0x844200, // 8 Orange       (111→84, 79→42, 37→0)
+        0x422A00, // 9 Brown        (67→42, 57→42, 0)
+        0x845454, // 10 Light Red   (154→168, 103→84, 89→84)
+        0x2A2A2A, // 11 Dark Grey   (68→42)
+        0x545454, // 12 Grey        (108→84)
+        0xA8D454, // 13 Light Green (154→168, 210→252, 132→84)
+        0x5454D4, // 14 Light Blue  (108→84, 94→84, 181→168)
+        0xA8A8A8  // 15 Light Grey  (149→168)
+    };
+#else
     // C64 "Pepto" palette (accurate colors based on measurements)
     // These are the 16 C64 colors
     static const uint32_t c64_palette[16] = {
@@ -316,7 +335,7 @@ static void init_c64_palette(void) {
         0x6C5EB5,  // 14 - Light Blue
         0x959595,  // 15 - Light Grey
     };
-
+#endif
     // Set up C64 colors (indices 0-15)
     for (int i = 0; i < 16; i++) {
         graphics_set_palette(i, c64_palette[i]);

@@ -389,6 +389,26 @@ void C64::MountDrive8(bool emul_1541_proc, const char *path)
            ThePrefs.Emul1541Proc, TheCPU1541->Idle);
 }
 
+void C64::UnmountDrive8()
+{
+    MII_DEBUG_PRINTF("UnmountDrive8\n");
+
+    auto prefs = ThePrefs;
+
+    // ВАЖНО: пустая строка, не nullptr
+    prefs.DrivePath[0].clear();
+
+    // сохранить режим эмуляции
+    prefs.Emul1541Proc = ThePrefs.Emul1541Proc;
+
+    NewPrefs(&prefs);
+    ThePrefs = prefs;
+
+    // сбросить состояние 1541 / IEC
+    TheCPU1541->AsyncReset();
+    TheGCRDisk->Reset();
+    TheIEC->Reset();
+}
 
 void C64::MountDrive1(const char *path)
 {
@@ -725,6 +745,16 @@ void c64_mount_disk(const uint8_t *data, uint32_t size, const char *filename)
            ThePrefs.Emul1541Proc);
 }
 
+void c64_unmount_disk(void) {
+    if (TheC64)
+        TheC64->UnmountDrive8();
+}
+
+void c64_eject_cartridge(void)
+{
+    if (!TheC64) return;
+    TheC64->InsertCartridge("");
+}
 
 /*
  *  Load a PRG file directly into RAM

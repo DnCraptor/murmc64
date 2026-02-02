@@ -57,6 +57,8 @@ const char *disk_loader_get_path(int index);
 void c64_mount_disk(const uint8_t *data, uint32_t size, const char *filename);
 void c64_load_file(const char *filename);  // Load file and auto-run (D64/PRG/CRT)
 void c64_load_cartridge(const char *filename);  // Load CRT cartridge
+void c64_unmount_disk(void);
+void c64_eject_cartridge(void);
 }
 
 #include <cstring>
@@ -676,6 +678,8 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     if (ps2kbd_is_reset_combo()) {
         if (!reset_combo_was_active) {
             MII_DEBUG_PRINTF("Ctrl+Alt+Del: C64 Reset\n");
+            c64_unmount_disk();
+            c64_eject_cartridge();
             c64_reset();
         }
         reset_combo_was_active = true;

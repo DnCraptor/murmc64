@@ -34,7 +34,7 @@ set(AUDIO_TYPE "PWM" CACHE STRING "Audio output: I2S or PWM")
 option(MOS2 "Build for Murmulator OS (m1p2/m2p2 format)" OFF)
 
 # CPU overclock configuration (252, 378, 504 MHz)
-set(CPU_SPEED "378" CACHE STRING "CPU clock in MHz: 252, 378, 504")
+set(CPU_SPEED "428" CACHE STRING "CPU clock in MHz: 252, 378, 504")
 
 # PSRAM speed configuration (84, 100, 133, 166 MHz target)
 set(PSRAM_SPEED "84" CACHE STRING "PSRAM max frequency in MHz: 84, 100, 133, 166")
