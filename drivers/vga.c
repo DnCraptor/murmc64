@@ -120,8 +120,7 @@ void __time_critical_func() dma_handler_VGA() {
     }
 
     uint32_t* * output_buffer = &lines_pattern[2 + (screen_line & 1)];
-    int line_number = screen_line / 2;
-    if (screen_line & 1) return;
+//    if (screen_line & 1) return;
     int y = screen_line >> 1;
 
     if (y < 0) {
@@ -152,7 +151,7 @@ void __time_critical_func() dma_handler_VGA() {
     uint max_width = graphics_buffer_width;
 
     // Индекс палитры в зависимости от настроек чередования строк и кадров
-    uint16_t* current_palette = palette[0];
+    uint16_t* current_palette = palette[screen_line & 1];
 
     // 8-bit buf
     register uint8_t* input_buffer = graphics_get_buffer() + y * SCREEN_WIDTH;
