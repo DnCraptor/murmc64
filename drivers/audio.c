@@ -10,9 +10,23 @@
  * free for the CPU to refill.
  */
 
+// Target samples per frame for consistent DMA timing
+// C64 PAL: 44100 / 50 = 882, NTSC: 44100 / 60 = 735
+#define TARGET_SAMPLES_PAL 882
+
 #include "audio.h"
 #include "board_config.h"
+#if FEATURE_AUDIO_I2S
 #include "audio_i2s.pio.h"
+#endif
+#if defined(FEATURE_AUDIO_PWM)
+#include <hardware/pwm.h>
+#define PWM_BITS 12
+#define PWM_WRAP ((1 << PWM_BITS) - 1)
+#define PWM_OSR               16
+#define PWM_AUDIO_RATE        AUDIO_SAMPLE_RATE
+#define PWM_DMA_SAMPLES       TARGET_SAMPLES_PAL
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -66,6 +80,7 @@ static void audio_dma_irq_handler(void);
 // I2S Implementation
 //=============================================================================
 
+#if defined(FEATURE_AUDIO_I2S)
 i2s_config_t i2s_get_default_config(void) {
     // Use 882 samples per frame for C64 PAL (44100 Hz / 50 fps)
     i2s_config_t config = {
@@ -82,6 +97,16 @@ i2s_config_t i2s_get_default_config(void) {
     };
     return config;
 }
+#endif
+#if defined(FEATURE_AUDIO_PWM)
+static int g_pwm_dma_chan = -1;
+static uint g_pwm_slice = 0;
+
+// DMA буфер: по одному 32-бит слову на сэмпл (L в low16, R в high16)
+static uint32_t *g_pwm_dma_buf = NULL;
+static uint32_t g_pwm_dma_count = 0;
+static bool g_pwm_dma_active = false;
+#endif
 
 void i2s_init(i2s_config_t *config) {
 #if ENABLE_DEBUG_LOGS
@@ -90,6 +115,53 @@ void i2s_init(i2s_config_t *config) {
            (unsigned)config->sample_freq, (unsigned long)config->dma_trans_count);
 #endif
 
+#if defined(FEATURE_AUDIO_PWM)
+    // PWM pins must be adjacent for single-slice stereo via CC
+    gpio_set_function(PWM_RIGHT_PIN, GPIO_FUNC_PWM);
+    gpio_set_function(PWM_LEFT_PIN,  GPIO_FUNC_PWM);
+
+    // Both pins (10/11) share the same slice
+    g_pwm_slice = pwm_gpio_to_slice_num(PWM_RIGHT_PIN);
+    pwm_config pcfg = pwm_get_default_config();
+    // PWM frequency = clk_sys / (clkdiv * (PWM_WRAP + 1))
+    uint32_t sys_clk = clock_get_hz(clk_sys);
+    float clkdiv = (float)sys_clk / (float)(PWM_AUDIO_RATE * (PWM_WRAP + 1));
+    pwm_config_set_clkdiv(&pcfg, clkdiv);
+    pwm_config_set_wrap(&pcfg, PWM_WRAP);
+    pwm_init(g_pwm_slice, &pcfg, true);
+    // Enable both PWM channels explicitly
+    pwm_set_chan_level(g_pwm_slice, PWM_CHAN_A, PWM_WRAP >> 1);
+    pwm_set_chan_level(g_pwm_slice, PWM_CHAN_B, PWM_WRAP >> 1);
+    pwm_set_enabled(g_pwm_slice, true);
+
+    // init duty to mid
+    pwm_set_gpio_level(PWM_RIGHT_PIN, PWM_WRAP >> 1);
+    pwm_set_gpio_level(PWM_LEFT_PIN,  PWM_WRAP >> 1);
+
+    // Allocate DMA buffer sized to ONE audio buffer worth of frames
+    static uint32_t dma_buf[PWM_DMA_SAMPLES];
+    g_pwm_dma_count = PWM_DMA_SAMPLES;
+    g_pwm_dma_buf = dma_buf;
+
+    g_pwm_dma_chan = dma_claim_unused_channel(true);
+
+    dma_channel_config dcfg = dma_channel_get_default_config(g_pwm_dma_chan);
+    channel_config_set_transfer_data_size(&dcfg, DMA_SIZE_32);
+    channel_config_set_read_increment(&dcfg, true);
+    channel_config_set_write_increment(&dcfg, false);
+    channel_config_set_dreq(&dcfg, pwm_get_dreq(g_pwm_slice));
+
+    // Destination = PWM CC register (writes both A/B in one 32-bit word)
+    dma_channel_configure(
+        g_pwm_dma_chan,
+        &dcfg,
+        &pwm_hw->slice[g_pwm_slice].cc,
+        g_pwm_dma_buf,
+        g_pwm_dma_count,
+        false
+    );
+#endif
+#if defined(FEATURE_AUDIO_I2S)
     audio_pio = config->pio;
     dma_transfer_count = config->dma_trans_count;
 
@@ -209,6 +281,7 @@ void i2s_init(i2s_config_t *config) {
     // Initialize state
     preroll_count = 0;
     dma_buffers_free_mask = (1u << DMA_BUFFER_COUNT) - 1u; // both free
+#endif
     audio_running = false;
 
 #if ENABLE_DEBUG_LOGS
@@ -216,6 +289,64 @@ void i2s_init(i2s_config_t *config) {
 #endif
 }
 
+static inline uint16_t s16_to_pwm_u16(int16_t s) {
+    int32_t v = (int32_t)s + 32768;      // 0..65535
+    v >>= (16 - PWM_BITS);               // -> 0..PWM_WRAP
+    if (v < 0) v = 0;
+    if (v > PWM_WRAP) v = PWM_WRAP;
+    return (uint16_t)v;
+}
+
+static inline uint32_t pack_pwm_cc(uint16_t left, uint16_t right) {
+    return ((uint32_t)right << 16) | left;
+}
+
+#if FEATURE_AUDIO_PWM
+void pwm_dma_write_count(const int16_t *samples,
+                         uint32_t sample_count)
+{
+    if (!samples || !g_pwm_dma_buf || g_pwm_dma_chan < 0)
+        return;
+
+    if (sample_count > g_pwm_dma_count)
+        sample_count = g_pwm_dma_count;
+
+    // Дождаться завершения предыдущего DMA
+    if (g_pwm_dma_active) {
+        dma_channel_wait_for_finish_blocking(g_pwm_dma_chan);
+        g_pwm_dma_active = false;
+    }
+
+    // Заполнить DMA буфер
+    for (uint32_t i = 0; i < sample_count; i++) {
+        int16_t l = samples[i * 2 + 0];
+        int16_t r = samples[i * 2 + 1];
+        g_pwm_dma_buf[i] =
+            pack_pwm_cc(s16_to_pwm_u16(l),
+                        s16_to_pwm_u16(r));
+    }
+
+    // Добить остаток тишиной
+    uint32_t mid = pack_pwm_cc(PWM_WRAP >> 1, PWM_WRAP >> 1);
+    for (uint32_t i = sample_count; i < g_pwm_dma_count; i++) {
+        g_pwm_dma_buf[i] = mid;
+    }
+
+    __dmb();
+
+    dma_channel_set_read_addr(g_pwm_dma_chan, g_pwm_dma_buf, false);
+    dma_channel_set_trans_count(g_pwm_dma_chan, g_pwm_dma_count, false);
+    dma_channel_start(g_pwm_dma_chan);
+
+    g_pwm_dma_active = true;
+}
+
+void i2s_dma_write(i2s_config_t *config, const int16_t *samples) {
+    i2s_dma_write_count(config, samples, TARGET_SAMPLES_PAL);
+}
+#endif
+
+#if defined(FEATURE_AUDIO_I2S)
 void i2s_dma_write_count(i2s_config_t *config, const int16_t *samples, uint32_t sample_count) {
     if (sample_count > dma_transfer_count) sample_count = dma_transfer_count;
     if (sample_count == 0) sample_count = 1;
@@ -293,6 +424,7 @@ void i2s_increase_volume(i2s_config_t *config) {
 void i2s_decrease_volume(i2s_config_t *config) {
     if (config->volume < 16) config->volume++;
 }
+#endif
 
 //=============================================================================
 // High-level Audio API
@@ -301,7 +433,9 @@ void i2s_decrease_volume(i2s_config_t *config) {
 static bool audio_initialized = false;
 static bool audio_enabled = true;
 static int master_volume = 100;  // 0-128
+#if defined(FEATURE_AUDIO_I2S)
 static i2s_config_t i2s_config;
+#endif
 
 // Startup mute: output silence for first N frames to let hardware settle
 #define STARTUP_FADE_FRAMES 120  // 2 seconds at 60fps
@@ -312,10 +446,6 @@ static int32_t lpf_state = 0;
 
 // Mixed stereo buffer
 static int16_t __attribute__((aligned(4))) mixed_buffer[AUDIO_BUFFER_SAMPLES * 2];
-
-// Target samples per frame for consistent DMA timing
-// C64 PAL: 44100 / 50 = 882, NTSC: 44100 / 60 = 735
-#define TARGET_SAMPLES_PAL 882
 
 static inline int16_t clamp_s16(int32_t v) {
     if (v > 32767) return 32767;
@@ -335,9 +465,18 @@ bool audio_init(void) {
     dma_buffers_free_mask = (1u << DMA_BUFFER_COUNT) - 1u;
     startup_frame_counter = 0;
 
+#if defined(FEATURE_AUDIO_I2S)
     i2s_config = i2s_get_default_config();
     i2s_init(&i2s_config);
-
+#endif
+#if defined(FEATURE_AUDIO_PWM)
+    i2s_config_t cfg = {
+        .sample_freq = AUDIO_SAMPLE_RATE,
+        .channel_count = 2,
+        .dma_trans_count = TARGET_SAMPLES_PAL,
+    };
+    i2s_init(&cfg);
+#endif
     audio_initialized = true;
     lpf_state = 0;
 
@@ -349,6 +488,16 @@ void audio_shutdown(void) {
 
     // Stop producing new audio and stop the PIO state machine first
     audio_running = false;
+
+#if defined(FEATURE_AUDIO_PWM)
+    if (g_pwm_dma_chan >= 0) {
+        dma_channel_abort(g_pwm_dma_chan);
+        dma_channel_unclaim(g_pwm_dma_chan);
+        g_pwm_dma_chan = -1;
+        g_pwm_dma_active = false;
+    }
+#endif
+#if defined(FEATURE_AUDIO_I2S)
     pio_sm_set_enabled(audio_pio, audio_sm, false);
 
     // Disable DMA IRQ and per-channel IRQ generation (audio uses IRQ1)
@@ -375,7 +524,7 @@ void audio_shutdown(void) {
     // Mark both buffers free again
     dma_buffers_free_mask = (1u << DMA_BUFFER_COUNT) - 1u;
     preroll_count = 0;
-
+#endif
     audio_initialized = false;
 }
 
@@ -413,13 +562,20 @@ void audio_submit(void) {
     if (startup_frame_counter < STARTUP_FADE_FRAMES) {
         memset(mixed_buffer, 0, TARGET_SAMPLES_PAL * 2 * sizeof(int16_t));
         startup_frame_counter++;
+#if defined(FEATURE_AUDIO_I2S)
         i2s_dma_write_count(&i2s_config, mixed_buffer, TARGET_SAMPLES_PAL);
+#endif
+#if defined(FEATURE_AUDIO_PWM)
+        pwm_dma_write_count(mixed_buffer, TARGET_SAMPLES_PAL);
+#endif
         return;
     }
 
     // For now, output silence - SID integration will fill this buffer
     memset(mixed_buffer, 0, TARGET_SAMPLES_PAL * 2 * sizeof(int16_t));
+#if defined(FEATURE_AUDIO_I2S)
     i2s_dma_write_count(&i2s_config, mixed_buffer, TARGET_SAMPLES_PAL);
+#endif
 }
 
 void audio_set_volume(int volume) {
@@ -449,7 +605,9 @@ void audio_flush_silence(void) {
         for (int i = 0; i < TARGET_SAMPLES_PAL * 2; i++) {
             mixed_buffer[i] = 0;
         }
+#if defined(FEATURE_AUDIO_I2S)
         i2s_dma_write_count(&i2s_config, mixed_buffer, TARGET_SAMPLES_PAL);
+#endif
     }
 }
 
@@ -459,6 +617,8 @@ void audio_debug_buffer_values(void) {
 #endif
 }
 
+#if defined(FEATURE_AUDIO_I2S)
 i2s_config_t* audio_get_i2s_config(void) {
     return &i2s_config;
 }
+#endif
