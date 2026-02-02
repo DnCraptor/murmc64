@@ -849,7 +849,6 @@ void c64_load_file(const char *filename)
     } else if (strcasecmp(ext, ".d64") == 0 || strcasecmp(ext, ".g64") == 0 || strcasecmp(ext, ".d81") == 0) {
         // Mount disk image (D64, G64, or D81)
         c64_mount_disk(NULL, 0, filename);
-
         // Queue LOAD"*",8,1 command
         // C64 keyboard buffer is only 10 chars, LOAD"*",8,1 + CR is 12 chars
         // Solution: Use C64 BASIC abbreviation - L + SHIFT+O (PETSCII $CF) = LOAD
@@ -858,12 +857,10 @@ void c64_load_file(const char *filename)
     } else if (strcasecmp(ext, ".crt") == 0) {
         // Load cartridge image
         c64_load_cartridge(filename);
+        if (TheC64)
+            TheC64->ResetAndAutoStart();
     } else {
         MII_DEBUG_PRINTF("Unsupported file type: %s\n", ext);
-    }
-    if (TheC64) {
-        TheC64->ResetAndAutoStart();
-        return;
     }
 }
 
