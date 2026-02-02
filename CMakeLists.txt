@@ -28,7 +28,7 @@ set(BOARD_VARIANT "M1" CACHE STRING "Board variant: M1 or M2")
 set(VIDEO_TYPE "VGA" CACHE STRING "Video output: HDMI or VGA")
 
 # Audio output configuration (I2S or PWM)
-set(AUDIO_TYPE "I2S" CACHE STRING "Audio output: I2S or PWM")
+set(AUDIO_TYPE "PWM" CACHE STRING "Audio output: I2S or PWM")
 
 # MOS2 support (generate .m1p2 or .m2p2 for Murmulator OS instead of .uf2)
 option(MOS2 "Build for Murmulator OS (m1p2/m2p2 format)" OFF)
@@ -74,9 +74,15 @@ endif()
 if(BOARD_VARIANT STREQUAL "M1")
     set(I2S_DATA_PIN "26")
     set(I2S_CLOCK_PIN_BASE "27")
+    set(PWM_RIGHT_PIN "26")
+    set(PWM_LEFT_PIN "27")
+    set(BEEPER_PIN "28")
 else()  # M2
     set(I2S_DATA_PIN "9")
     set(I2S_CLOCK_PIN_BASE "10")
+    set(BEEPER_PIN "9")
+    set(PWM_RIGHT_PIN "10")
+    set(PWM_LEFT_PIN "11")
 endif()
 
 # USB HID Host support (keyboard and gamepad via USB)
@@ -184,7 +190,15 @@ if(DEBUG_LOGS_ENABLED)
 else()
     target_compile_definitions(drivers PRIVATE ENABLE_DEBUG_LOGS=0)
 endif()
-target_link_libraries(drivers pico_stdlib hardware_dma hardware_pio hardware_spi hardware_clocks hardware_irq)
+target_link_libraries(drivers
+    pico_stdlib
+    hardware_dma
+    hardware_pio
+    hardware_spi
+    hardware_clocks
+    hardware_irq
+    hardware_pwm
+)
 
 # Frodo4 C64 Emulator sources
 add_executable(${BUILD_NAME}
@@ -247,18 +261,26 @@ target_compile_definitions(${BUILD_NAME} PRIVATE
     FIRMWARE_VERSION="${FIRMWARE_VERSION}"
     # RP2350 platform flag
     FRODO_RP2350=1
-    # Disable SDL and GTK
-    # I2S Audio configuration
-    # NOTE: HDMI uses PIO1, PS/2 uses PIO0 SM0 (claimed dynamically)
-    # So I2S uses PIO0 SM2 (claimed statically before PS/2 init)
-    PICO_AUDIO_I2S_PIO=0
-    PICO_AUDIO_I2S_STATE_MACHINE=2
-    PICO_AUDIO_I2S_DMA_IRQ=1
-    PICO_AUDIO_I2S_DMA_CHANNEL=6
-    PICO_AUDIO_I2S_DATA_PIN=${I2S_DATA_PIN}
-    PICO_AUDIO_I2S_CLOCK_PIN_BASE=${I2S_CLOCK_PIN_BASE}
-    FEATURE_AUDIO=1
 )
+
+if(AUDIO_TYPE STREQUAL "I2S")
+    target_compile_definitions(${BUILD_NAME} PRIVATE
+        # Disable SDL and GTK
+        # I2S Audio configuration
+        # NOTE: HDMI uses PIO1, PS/2 uses PIO0 SM0 (claimed dynamically)
+        # So I2S uses PIO0 SM2 (claimed statically before PS/2 init)
+        PICO_AUDIO_I2S_PIO=0
+        PICO_AUDIO_I2S_STATE_MACHINE=2
+        PICO_AUDIO_I2S_DMA_IRQ=1
+        PICO_AUDIO_I2S_DMA_CHANNEL=6
+        PICO_AUDIO_I2S_DATA_PIN=${I2S_DATA_PIN}
+        PICO_AUDIO_I2S_CLOCK_PIN_BASE=${I2S_CLOCK_PIN_BASE}
+    )
+    target_compile_definitions(drivers PRIVATE FEATURE_AUDIO_I2S=1)
+elseif(AUDIO_TYPE STREQUAL "PWM")
+    target_compile_definitions(${BUILD_NAME} PRIVATE FEATURE_AUDIO_PWM=1)
+    target_compile_definitions(drivers PRIVATE FEATURE_AUDIO_PWM=1)
+endif()
 
 if (VIDEO_HDMI)
     target_compile_definitions(${BUILD_NAME} PRIVATE

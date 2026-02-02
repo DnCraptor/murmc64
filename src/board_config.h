@@ -113,6 +113,10 @@ static inline uint get_psram_pin(void) {
 #define I2S_DATA_PIN       26
 #define I2S_CLOCK_PIN_BASE 27
 
+#define PWM_RIGHT_PIN 26
+#define PWM_LEFT_PIN 27
+#define BEEPER_PIN 28
+
 #endif // BOARD_M1
 
 //=============================================================================
@@ -150,6 +154,10 @@ static inline uint get_psram_pin(void) {
 // I2S Audio Pins
 #define I2S_DATA_PIN       9
 #define I2S_CLOCK_PIN_BASE 10
+
+#define BEEPER_PIN 9
+#define PWM_RIGHT_PIN 10
+#define PWM_LEFT_PIN 11
 
 #endif // BOARD_M2
 

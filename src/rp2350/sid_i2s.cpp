@@ -138,9 +138,14 @@ void sid_i2s_update(void)
     __dmb();
     audio_state.read_index = read_idx;
 
+#if defined(FEATURE_AUDIO_I2S)
     // Submit to I2S DMA
     i2s_config_t *config = audio_get_i2s_config();
     i2s_dma_write_count(config, mixed_buffer, target_samples);
+#endif
+#if defined(FEATURE_AUDIO_PWM)
+    pwm_dma_write_count(mixed_buffer, target_samples);
+#endif
 }
 
 // Add samples to the SID ring buffer (called from SID emulation)

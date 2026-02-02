@@ -50,6 +50,7 @@ void i2s_dma_write(i2s_config_t *config, const int16_t *samples);
 
 // Write specific number of samples to I2S via DMA
 void i2s_dma_write_count(i2s_config_t *config, const int16_t *samples, uint32_t sample_count);
+void pwm_dma_write_count(const int16_t *samples, uint32_t sample_count);
 
 // Adjust volume (0 = loudest, 16 = quietest)
 void i2s_volume(i2s_config_t *config, uint8_t volume);
