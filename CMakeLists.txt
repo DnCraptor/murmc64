@@ -24,7 +24,7 @@ set(FIRMWARE_VERSION "v1.02")
 set(PICO_BOARD pico2 CACHE STRING "Pico board type")
 
 # Board configuration variant (M1, M2)
-set(BOARD_VARIANT "M1" CACHE STRING "Board variant: M1 or M2")
+set(BOARD_VARIANT "M2" CACHE STRING "Board variant: M1 or M2")
 
 set(VIDEO_TYPE "VGA" CACHE STRING "Video output: HDMI or VGA")
 
@@ -32,7 +32,7 @@ set(VIDEO_TYPE "VGA" CACHE STRING "Video output: HDMI or VGA")
 set(AUDIO_TYPE "PWM" CACHE STRING "Audio output: I2S or PWM")
 
 # MOS2 support (generate .m1p2 or .m2p2 for Murmulator OS instead of .uf2)
-option(MOS2 "Build for Murmulator OS (m1p2/m2p2 format)" OFF)
+option(MOS2 "Build for Murmulator OS (m1p2/m2p2 format)" ON)
 
 # CPU overclock configuration (252, 378, 504 MHz)
 set(CPU_SPEED "428" CACHE STRING "CPU clock in MHz: 252, 378, 504")
@@ -95,6 +95,8 @@ option(PS2_KEYBOARD_ENABLED "Enable PS/2 keyboard input" ON)
 
 # Verbose debug logging toggle
 option(DEBUG_LOGS_ENABLED "Enable verbose debug logging" OFF)
+# debug line (to connect other pico for this)
+option(UART_ENABLED "Enable USB HID Host for keyboard/gamepad" OFF)
 
 # Use Frodo Lite (line-based) instead of Frodo SC (cycle-accurate) for better performance
 option(FRODO_LITE "Use Frodo Lite (line-based emulation)" ON)
@@ -344,7 +346,11 @@ else()
     # Explicit linking causes "CDC not enabled" warning and breaks USB Serial!
     message(STATUS "USB CDC stdio ENABLED (USB HID Host is disabled)")
 endif()
-pico_enable_stdio_uart(${BUILD_NAME} 1)
+if(UART_ENABLED)
+    pico_enable_stdio_uart(${BUILD_NAME} 1)
+else()
+    pico_enable_stdio_uart(${BUILD_NAME} 0)
+endif()
 
 # Create UF2 output
 pico_add_extra_outputs(${BUILD_NAME})
