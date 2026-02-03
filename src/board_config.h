@@ -110,8 +110,10 @@ static inline uint get_psram_pin(void) {
 #define NESPAD_GPIO_LATCH 15
 
 // I2S Audio Pins
+#ifndef I2S_DATA_PIN
 #define I2S_DATA_PIN       26
 #define I2S_CLOCK_PIN_BASE 27
+#endif
 
 #define PWM_RIGHT_PIN 26
 #define PWM_LEFT_PIN 27
