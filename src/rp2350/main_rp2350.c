@@ -174,7 +174,7 @@ static void __no_inline_not_in_flash_func(set_flash_timings)(int cpu_mhz) {
                         divisor << QMI_M0_TIMING_CLKDIV_LSB;
 }
 
-static void init_clocks(void) {
+static void __no_inline_not_in_flash_func(init_clocks)(void) {
     // Overclock BEFORE stdio_init_all() - matching murmgenesis approach
 #if CPU_CLOCK_MHZ > 252
     // Disable voltage limit for high voltages (>1.50V)
@@ -190,20 +190,16 @@ static void init_clocks(void) {
         // Fallback to safe speed if requested speed fails
         set_sys_clock_khz(252 * 1000, true);
     }
+}
 
+static void __no_inline_not_in_flash_func(init_stdio)(void) {
+#if ENABLE_DEBUG_LOGS
     // Initialize stdio AFTER clock is stable
     stdio_init_all();
-
     // Startup delay for USB serial console
     for (int i = 0; i < 8; i++) {
         sleep_ms(500);
     }
-}
-
-static void init_stdio(void) {
-    // NOTE: stdio_init_all() was already called in init_clocks() before overclocking
-
-#if ENABLE_DEBUG_LOGS
     // Print startup banner (no delay - USB Serial should already be enumerated)
     printf("\n\n");
 
