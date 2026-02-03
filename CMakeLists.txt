@@ -35,7 +35,7 @@ option(AUDIO_TYPE "Audio output configuration (I2S or PWM)" "PWM")
 set(AUDIO_TYPE "PWM")
 
 # MOS2 support (generate .m1p2 or .m2p2 for Murmulator OS instead of .uf2)
-option(MOS2 "MOS2 support" OFF)
+option(MOS2 "MOS2 support" ON)
 
 # CPU overclock configuration (252, 378, 428(VGA), 504 MHz)
 option(CPU_SPEED "CPU overclock configuration (252, 378, 428(VGA), 504 MHz)" "252")
