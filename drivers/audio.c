@@ -289,6 +289,7 @@ void i2s_init(i2s_config_t *config) {
 #endif
 }
 
+#if FEATURE_AUDIO_PWM
 static inline uint16_t s16_to_pwm_u16(int16_t s) {
     int32_t v = (int32_t)s + 32768;      // 0..65535
     v >>= (16 - PWM_BITS);               // -> 0..PWM_WRAP
@@ -301,7 +302,6 @@ static inline uint32_t pack_pwm_cc(uint16_t left, uint16_t right) {
     return ((uint32_t)right << 16) | left;
 }
 
-#if FEATURE_AUDIO_PWM
 void pwm_dma_write_count(const int16_t *samples,
                          uint32_t sample_count)
 {
