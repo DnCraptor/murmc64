@@ -14,10 +14,21 @@
 #include "debug_log.h"
 #include "disk_ui.h"
 
-// Forward declarations for disk loader
+// Forward declarations for disk loader (TODO: -> .h)
+#define MAX_FILENAME_LEN    64
+typedef struct {
+    char name[MAX_FILENAME_LEN];
+    uint32_t size;
+    uint8_t type;  // 0=D64, 1=G64, 2=T64, 3=TAP, 4=PRG, 5=CRT, 6=D81, 7=DIR
+} disk_entry_t;
+
 extern int disk_loader_get_count(void);
 extern const char *disk_loader_get_filename(int index);
 extern const char *disk_loader_get_path(int index);
+extern const disk_entry_t *disk_loader_get_entry(int index);
+extern int disk_loader_scan_dir(const char *path);
+extern const char *disk_loader_get_cwd(void);
+extern int disk_loader_delete(int index);
 
 // UI state
 static volatile disk_ui_state_t ui_state = DISK_UI_HIDDEN;
@@ -146,6 +157,25 @@ static const uint8_t font_6x8[][8] = {
     {0x00,0x00,0x40,0xA8,0x10,0x00,0x00,0x00}, // 126 ~
 };
 
+extern char current_scan_path[128];
+
+static inline bool has_parent_dir(void)
+{
+    return current_scan_path[1] != 0; // "/" - root
+}
+
+static void clamp_scroll(void)
+{
+    if (selected_file < scroll_offset)
+        scroll_offset = selected_file;
+
+    if (selected_file >= scroll_offset + MAX_VISIBLE)
+        scroll_offset = selected_file - MAX_VISIBLE + 1;
+
+    if (scroll_offset < 0)
+        scroll_offset = 0;
+}
+
 // Draw a filled rectangle
 static void draw_rect(uint8_t *fb, int x, int y, int w, int h, uint8_t color) {
     for (int dy = 0; dy < h; dy++) {
@@ -235,9 +265,10 @@ void disk_ui_init(void) {
 
 void disk_ui_show(void) {
     if (ui_state == DISK_UI_HIDDEN) {
+        disk_loader_scan_dir(current_scan_path);
         ui_state = DISK_UI_SELECT_FILE;
-        selected_file = 0;
         scroll_offset = 0;
+        clamp_scroll();
         MII_DEBUG_PRINTF("Disk UI: showing file selection\n");
     }
 }
@@ -259,8 +290,12 @@ bool disk_ui_is_visible(void) {
     return ui_state != DISK_UI_HIDDEN;
 }
 
+int disk_ui_get_count(void) {
+    return disk_loader_get_count() + (has_parent_dir() ? 1 : 0);
+}
+
 void disk_ui_move_up(void) {
-    int count = disk_loader_get_count();
+    int count = disk_ui_get_count();
     if (count == 0) return;
 
     if (selected_file > 0) {
@@ -275,7 +310,7 @@ void disk_ui_move_up(void) {
 }
 
 void disk_ui_move_down(void) {
-    int count = disk_loader_get_count();
+    int count = disk_ui_get_count();
     if (count == 0) return;
 
     if (selected_file < count - 1) {
@@ -290,11 +325,48 @@ void disk_ui_move_down(void) {
 }
 
 int disk_ui_get_selected(void) {
+    if (has_parent_dir()) {
+        return selected_file - 1;
+    }
     return selected_file;
 }
 
 void disk_ui_select(void) {
-    if (ui_state == DISK_UI_SELECT_FILE && disk_loader_get_count() > 0) {
+    if (ui_state == DISK_UI_SELECT_FILE && disk_ui_get_count() > 0) {
+        int base = has_parent_dir() ? 1 : 0;
+
+        // ".."
+        if (has_parent_dir() && selected_file == 0) {
+            char *p = strrchr(current_scan_path, '/');
+            if (p && p != current_scan_path)
+                *p = 0;
+            else
+                strcpy(current_scan_path, "/");
+
+            disk_loader_scan_dir(current_scan_path);
+            selected_file = 0;
+            scroll_offset = 0;
+            return;
+        }
+
+        int real = selected_file - base;
+        const disk_entry_t *e = disk_loader_get_entry(real);
+        if (!e)
+            return;
+
+        // directory enter
+        if (e->type == 7) {
+            char new_path[128];
+            snprintf(new_path, sizeof(new_path), "%s/%s",
+                    current_scan_path, e->name);
+            strncpy(current_scan_path, new_path, sizeof(current_scan_path)-1);
+            disk_loader_scan_dir(current_scan_path);
+            selected_file = 0;
+            scroll_offset = 0;
+            return;
+        }
+
+        // file → action dialog
         ui_state = DISK_UI_SELECT_ACTION;
         selected_action = 0;  // Default to "Load"
         MII_DEBUG_PRINTF("Disk UI: showing action selection for file %d\n", selected_file);
@@ -334,11 +406,24 @@ void disk_ui_cancel_action(void) {
     }
 }
 
+void disk_ui_delete(void) {
+    if (has_parent_dir() && selected_file == 0)
+        return;
+
+    int base = has_parent_dir() ? 1 : 0;
+    int idx = selected_file - base;
+    if (disk_loader_delete(idx) == 0) {
+        disk_loader_scan_dir(current_scan_path);
+        int count = disk_ui_get_count();
+        if (selected_file >= count)
+            selected_file = count ? count - 1 : 0;
+    }
+}
+
 bool disk_ui_handle_key(uint8_t key) {
     if (ui_state == DISK_UI_HIDDEN) {
         return false;
     }
-
     switch (key) {
         case 0x1B:  // Escape
             disk_ui_hide();
@@ -394,7 +479,7 @@ void disk_ui_render(uint8_t *framebuffer) {
         return;
     }
 
-    int count = disk_loader_get_count();
+    int count = disk_ui_get_count();
     int content_x = UI_X + UI_PADDING;
     int content_y = UI_Y + HEADER_HEIGHT + UI_PADDING;
     int content_width = UI_WIDTH - UI_PADDING * 2;
@@ -415,18 +500,27 @@ void disk_ui_render(uint8_t *framebuffer) {
         draw_string(framebuffer, content_x, y, "No disk images found", COLOR_TEXT);
         draw_string(framebuffer, content_x, y + LINE_HEIGHT, "Place .d64/.g64/.prg in /c64", COLOR_TEXT);
     } else {
-        int visible = (count < MAX_VISIBLE) ? count : MAX_VISIBLE;
+        int base = has_parent_dir() ? 1 : 0;
+        int total = count;
+        int visible = (total < MAX_VISIBLE) ? total : MAX_VISIBLE;
 
         for (int i = 0; i < visible; i++) {
-            int idx = scroll_offset + i;
-            if (idx >= count) break;
+            int ui_idx = scroll_offset + i;
+            if (ui_idx >= total) break;
 
-            const char *filename = disk_loader_get_filename(idx);
-            if (!filename) continue;
-
-            bool is_selected = (idx == selected_file);
-            draw_menu_item(framebuffer, content_x, y, content_width - 8,
-                          filename, max_chars - 2, is_selected);
+            bool selected = (ui_idx == selected_file);
+            if (has_parent_dir() && ui_idx == 0) {
+                draw_menu_item(framebuffer, content_x, y,
+                               content_width - 8, "..",
+                               max_chars - 2, selected);
+            } else {
+                int real = ui_idx - base;
+                const disk_entry_t *e = disk_loader_get_entry(real);
+                if (!e) continue;
+                draw_menu_item(framebuffer, content_x, y,
+                               content_width - 8, e->name,
+                               max_chars - 2, selected);
+            }
             y += LINE_HEIGHT;
         }
     }

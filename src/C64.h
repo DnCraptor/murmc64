@@ -107,6 +107,7 @@ public:
 
 	void NewPrefs(const Prefs *prefs);
 	void MountDrive8(bool emul_1541_proc, const char * path);
+	void UnmountDrive8();
 	void MountDrive1(const char * path = nullptr);
 	void InsertCartridge(const std::string & path);
 

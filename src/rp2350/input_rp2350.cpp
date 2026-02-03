@@ -35,6 +35,7 @@ extern "C" {
 void disk_ui_init(void);
 void disk_ui_show(void);
 void disk_ui_hide(void);
+void disk_ui_delete(void);
 bool disk_ui_is_visible(void);
 void disk_ui_move_up(void);
 void disk_ui_move_down(void);
@@ -57,6 +58,8 @@ const char *disk_loader_get_path(int index);
 void c64_mount_disk(const uint8_t *data, uint32_t size, const char *filename);
 void c64_load_file(const char *filename);  // Load file and auto-run (D64/PRG/CRT)
 void c64_load_cartridge(const char *filename);  // Load CRT cartridge
+void c64_unmount_disk(void);
+void c64_eject_cartridge(void);
 }
 
 #include <cstring>
@@ -598,6 +601,8 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
                         disk_ui_select();
                     } else if (key == 0x1B) {  // Escape - close UI
                         disk_ui_hide();
+                    } else if (key == 'D') {
+                        disk_ui_delete();
                     }
                 } else if (state == DISK_UI_SELECT_ACTION) {
                     // Action selection mode
@@ -610,6 +615,8 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
                         int action = disk_ui_get_action();
                         const char *path = disk_loader_get_path(sel);
                         if (path) {
+                            c64_unmount_disk();
+                            c64_eject_cartridge();
                             if (action == 0) {
                                 // Load (run the disk/PRG)
                                 MII_DEBUG_PRINTF("Loading disk: %s\n", path);
@@ -676,6 +683,8 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     if (ps2kbd_is_reset_combo()) {
         if (!reset_combo_was_active) {
             MII_DEBUG_PRINTF("Ctrl+Alt+Del: C64 Reset\n");
+            c64_unmount_disk();
+            c64_eject_cartridge();
             c64_reset();
         }
         reset_combo_was_active = true;
