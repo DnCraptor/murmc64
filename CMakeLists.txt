@@ -24,18 +24,18 @@ set(FIRMWARE_VERSION "v1.02")
 set(PICO_BOARD pico2 CACHE STRING "Pico board type")
 
 # Board configuration variant (M1, M2)
-set(BOARD_VARIANT "M1" CACHE STRING "Board variant: M1 or M2")
+option(BOARD_VARIANT "M1 or M2" "M1")
 
-set(VIDEO_TYPE "VGA" CACHE STRING "Video output: HDMI or VGA")
+option(VIDEO_TYPE "VGA or HDMI" "VGA")
 
 # Audio output configuration (I2S or PWM)
-set(AUDIO_TYPE "PWM" CACHE STRING "Audio output: I2S or PWM")
+option(AUDIO_TYPE "Audio output configuration (I2S or PWM)" "I2S")
 
 # MOS2 support (generate .m1p2 or .m2p2 for Murmulator OS instead of .uf2)
-option(MOS2 "Build for Murmulator OS (m1p2/m2p2 format)" OFF)
+option(MOS2 "MOS2 support" OFF)
 
 # CPU overclock configuration (252, 378, 428(VGA), 504 MHz)
-set(CPU_SPEED "252" CACHE STRING "CPU clock in MHz: 252, 378, 428, 504")
+option(CPU_SPEED "CPU overclock configuration (252, 378, 428(VGA), 504 MHz)" "252")
 
 # PSRAM speed configuration (84, 100, 133, 166 MHz target)
 set(PSRAM_SPEED "84" CACHE STRING "PSRAM max frequency in MHz: 84, 100, 133, 166")
