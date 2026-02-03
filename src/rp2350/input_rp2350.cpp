@@ -35,6 +35,7 @@ extern "C" {
 void disk_ui_init(void);
 void disk_ui_show(void);
 void disk_ui_hide(void);
+void disk_ui_delete(void);
 bool disk_ui_is_visible(void);
 void disk_ui_move_up(void);
 void disk_ui_move_down(void);
@@ -600,6 +601,8 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
                         disk_ui_select();
                     } else if (key == 0x1B) {  // Escape - close UI
                         disk_ui_hide();
+                    } else if (key == 'D') {
+                        disk_ui_delete();
                     }
                 } else if (state == DISK_UI_SELECT_ACTION) {
                     // Action selection mode
@@ -612,6 +615,8 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
                         int action = disk_ui_get_action();
                         const char *path = disk_loader_get_path(sel);
                         if (path) {
+                            c64_unmount_disk();
+                            c64_eject_cartridge();
                             if (action == 0) {
                                 // Load (run the disk/PRG)
                                 MII_DEBUG_PRINTF("Loading disk: %s\n", path);

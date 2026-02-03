@@ -29,16 +29,16 @@
 
 #define MAX_DISK_IMAGES     100
 #define MAX_FILENAME_LEN    64
-#define DISK_SCAN_PATH      "/c64"
+#define DEFAULT_SCAN_PATH   "/c64"
 
 //=============================================================================
 // Disk Image Entry
 //=============================================================================
 
 typedef struct {
-    char filename[MAX_FILENAME_LEN];
+    char name[MAX_FILENAME_LEN];
     uint32_t size;
-    uint8_t type;  // 0=D64, 1=G64, 2=T64, 3=TAP, 4=PRG, 5=CRT, 6=D81
+    uint8_t type;  // 0=D64, 1=G64, 2=T64, 3=TAP, 4=PRG, 5=CRT, 6=D81, 7=DIR
 } disk_entry_t;
 
 //=============================================================================
@@ -50,6 +50,8 @@ static struct {
     int count;
     bool initialized;
 } disk_loader;
+
+char current_scan_path[128] = DEFAULT_SCAN_PATH;
 
 //=============================================================================
 // File Type Detection
@@ -79,30 +81,41 @@ void disk_loader_init(void)
 {
     memset(&disk_loader, 0, sizeof(disk_loader));
     disk_loader.initialized = true;
-
+    strncpy(current_scan_path, DEFAULT_SCAN_PATH, sizeof(current_scan_path)-1);
     MII_DEBUG_PRINTF("Disk loader initialized\n");
 }
 
-void disk_loader_scan(void)
+static int disk_entry_cmp(const void *a, const void *b)
+{
+    const disk_entry_t *ea = (const disk_entry_t *)a;
+    const disk_entry_t *eb = (const disk_entry_t *)b;
+    // Directories first
+    if (ea->type == 7 && eb->type != 7) return -1;
+    if (ea->type != 7 && eb->type == 7) return 1;
+    // Same type: sort by name (case-insensitive)
+    return strcasecmp(ea->name, eb->name);
+}
+
+int disk_loader_scan_dir(const char *path)
 {
     if (!disk_loader.initialized) {
         disk_loader_init();
     }
 
+    if (path) {
+        strncpy(current_scan_path, path, sizeof(current_scan_path)-1);
+        current_scan_path[sizeof(current_scan_path)-1] = 0;
+    }    
     disk_loader.count = 0;
 
     DIR dir;
     FILINFO fno;
 
     // Try to open disk directory
-    FRESULT fr = f_opendir(&dir, DISK_SCAN_PATH);
+    FRESULT fr = f_opendir(&dir, current_scan_path);
     if (fr != FR_OK) {
-        // Try root directory
-        fr = f_opendir(&dir, "/");
-        if (fr != FR_OK) {
-            MII_DEBUG_PRINTF("Failed to open directory for scanning\n");
-            return;
-        }
+        return -fr;
+        MII_DEBUG_PRINTF("Failed to open directory for scanning\n");
     }
 
     MII_DEBUG_PRINTF("Scanning for disk images...\n");
@@ -113,8 +126,13 @@ void disk_loader_scan(void)
             break;  // End of directory
         }
 
-        // Skip directories
+        disk_entry_t *entry = &disk_loader.entries[disk_loader.count];
+
         if (fno.fattrib & AM_DIR) {
+            strncpy(entry->name, strlen(fno.fname) >= MAX_FILENAME_LEN-1 ? fno.altname : fno.fname, MAX_FILENAME_LEN-1);
+            entry->size = 0;
+            entry->type = 7;
+            disk_loader.count++;
             continue;
         }
 
@@ -124,21 +142,34 @@ void disk_loader_scan(void)
             continue;
         }
 
+
         // Add to list
-        disk_entry_t *entry = &disk_loader.entries[disk_loader.count];
-        strncpy(entry->filename, fno.fname, MAX_FILENAME_LEN - 1);
-        entry->filename[MAX_FILENAME_LEN - 1] = '\0';
+        strncpy(entry->name, strlen(fno.fname) >= MAX_FILENAME_LEN-1 ? fno.altname : fno.fname, MAX_FILENAME_LEN - 1);
         entry->size = fno.fsize;
         entry->type = type;
 
-        MII_DEBUG_PRINTF("  Found: %s (%lu bytes)\n", entry->filename, (unsigned long)entry->size);
+        MII_DEBUG_PRINTF("  Found: %s (%lu bytes)\n", entry->name, (unsigned long)entry->size);
 
         disk_loader.count++;
     }
 
     f_closedir(&dir);
 
+    // Sort entries: directories first, then by name (case-insensitive)
+    if (disk_loader.count > 1) {
+        qsort(disk_loader.entries,
+              disk_loader.count,
+              sizeof(disk_entry_t),
+              disk_entry_cmp);
+    }
+
     MII_DEBUG_PRINTF("Found %d disk images\n", disk_loader.count);
+    return disk_loader.count;
+}
+
+void disk_loader_scan(void)
+{
+    disk_loader_scan_dir(current_scan_path);
 }
 
 int disk_loader_get_count(void)
@@ -151,7 +182,29 @@ const char *disk_loader_get_filename(int index)
     if (index < 0 || index >= disk_loader.count) {
         return NULL;
     }
-    return disk_loader.entries[index].filename;
+    return disk_loader.entries[index].name;
+}
+
+const disk_entry_t *disk_loader_get_entry(int index)
+{
+    if (index < 0 || index >= disk_loader.count)
+        return NULL;
+    return &disk_loader.entries[index];
+}
+
+const char *disk_loader_get_cwd(void)
+{
+    return current_scan_path;
+}
+
+int disk_loader_delete(int index)
+{
+    const disk_entry_t *e = disk_loader_get_entry(index);
+    if (!e)
+        return -1;
+    char path[256];
+    snprintf(path, sizeof(path), "%s/%s", current_scan_path, e->name);
+    return f_unlink(path);
 }
 
 // Returns full path to disk image (static buffer - not thread safe)
@@ -164,7 +217,7 @@ const char *disk_loader_get_path(int index)
     }
 
     snprintf(path_buffer, sizeof(path_buffer), "%s/%s",
-             DISK_SCAN_PATH, disk_loader.entries[index].filename);
+             current_scan_path, disk_loader.entries[index].name);
 
     return path_buffer;
 }
@@ -183,57 +236,4 @@ int disk_loader_get_type(int index)
         return -1;
     }
     return disk_loader.entries[index].type;
-}
-
-// Load disk image into buffer (returns allocated buffer, caller must free)
-uint8_t *disk_loader_load(int index, uint32_t *out_size)
-{
-    if (index < 0 || index >= disk_loader.count) {
-        return NULL;
-    }
-
-    disk_entry_t *entry = &disk_loader.entries[index];
-
-    // Build full path
-    char path[128];
-    snprintf(path, sizeof(path), "%s/%s", DISK_SCAN_PATH, entry->filename);
-
-    FIL file;
-    FRESULT fr = f_open(&file, path, FA_READ);
-    if (fr != FR_OK) {
-        // Try root path
-        snprintf(path, sizeof(path), "/%s", entry->filename);
-        fr = f_open(&file, path, FA_READ);
-        if (fr != FR_OK) {
-            MII_DEBUG_PRINTF("Failed to open: %s\n", entry->filename);
-            return NULL;
-        }
-    }
-
-    // Allocate buffer in PSRAM
-    uint8_t *buffer = (uint8_t *)psram_malloc(entry->size);
-    if (!buffer) {
-        f_close(&file);
-        MII_DEBUG_PRINTF("Failed to allocate %lu bytes\n", (unsigned long)entry->size);
-        return NULL;
-    }
-
-    // Read file
-    UINT bytes_read;
-    fr = f_read(&file, buffer, entry->size, &bytes_read);
-    f_close(&file);
-
-    if (fr != FR_OK || bytes_read != entry->size) {
-        psram_free(buffer);
-        MII_DEBUG_PRINTF("Failed to read file\n");
-        return NULL;
-    }
-
-    if (out_size) {
-        *out_size = entry->size;
-    }
-
-    MII_DEBUG_PRINTF("Loaded: %s (%lu bytes)\n", entry->filename, (unsigned long)entry->size);
-
-    return buffer;
 }

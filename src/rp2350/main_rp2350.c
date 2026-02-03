@@ -376,7 +376,7 @@ static void init_storage(void) {
         MII_DEBUG_PRINTF("Continuing without disk support...\n");
     } else {
         MII_DEBUG_PRINTF("SD card mounted OK\n");
-
+        f_mkdir("/c64");
         // Scan for disk images
         disk_loader_init();
         disk_loader_scan();

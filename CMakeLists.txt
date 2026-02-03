@@ -17,10 +17,11 @@ cmake_minimum_required(VERSION 3.13)
 # Build name - will be modified based on MOS2 setting
 set(BUILD_NAME "murmc64")
 
+# Firmware version string (set by release.sh or manually)
+set(FIRMWARE_VERSION "v1.02")
+
 # Set board to Pico 2 (RP2350)
 set(PICO_BOARD pico2 CACHE STRING "Pico board type")
-
-set(BUILD_VERSION "1.0.2")
 
 # Board configuration variant (M1, M2)
 set(BOARD_VARIANT "M1" CACHE STRING "Board variant: M1 or M2")
@@ -59,7 +60,7 @@ IF(VIDEO_HDMI)
 endif ()
 
 SET(BUILD_NAME "${BUILD_NAME}-${CPU_SPEED}MHz")
-SET(BUILD_NAME "${BUILD_NAME}-${AUDIO_TYPE}-${BUILD_VERSION}")
+SET(BUILD_NAME "${BUILD_NAME}-${AUDIO_TYPE}-${FIRMWARE_VERSION}")
 
 # CPU voltage selection based on speed
 if(CPU_SPEED GREATER_EQUAL 504)
@@ -87,7 +88,7 @@ endif()
 
 # USB HID Host support (keyboard and gamepad via USB)
 # When enabled, USB CDC stdio is disabled!
-option(USB_HID_ENABLED "Enable USB HID Host for keyboard/gamepad" OFF)
+option(USB_HID_ENABLED "Enable USB HID Host for keyboard/gamepad" ON)
 
 # PS/2 keyboard support toggle
 option(PS2_KEYBOARD_ENABLED "Enable PS/2 keyboard input" ON)
@@ -97,9 +98,6 @@ option(DEBUG_LOGS_ENABLED "Enable verbose debug logging" OFF)
 
 # Use Frodo Lite (line-based) instead of Frodo SC (cycle-accurate) for better performance
 option(FRODO_LITE "Use Frodo Lite (line-based emulation)" ON)
-
-# Firmware version string (set by release.sh or manually)
-set(FIRMWARE_VERSION "v1.00" CACHE STRING "Firmware version string for display")
 
 message(STATUS "MurmC64 - Commodore 64 Emulator (Frodo4) for RP2350")
 message(STATUS "Board: ${BOARD_VARIANT}, CPU: ${CPU_SPEED} MHz, PSRAM: ${PSRAM_SPEED} MHz, Voltage: ${CPU_VOLTAGE}")
