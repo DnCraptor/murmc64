@@ -71,7 +71,7 @@ void graphics_set_buffer(uint8_t *buffer) {
     graphics_buffer = buffer;
 }
 
-uint8_t* graphics_get_buffer() {
+uint8_t* __scratch_x() graphics_get_buffer() {
     return graphics_buffer;
 }
 

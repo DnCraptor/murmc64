@@ -63,28 +63,19 @@ void graphics_set_shift(int x, int y) {
     graphics_buffer_shift_y = y;
 }
 
-uint8_t* __not_in_flash_func(get_line_buffer)(int line) {
+static inline uint8_t* __not_in_flash_func(get_line_buffer)(int line) {
     if (!graphics_buffer) return NULL;
     if (line < 0 || line >= graphics_buffer_height) return NULL;
     return graphics_buffer + line * graphics_buffer_width;
 }
 
-static struct video_mode_t video_mode[] = {
-    { // 640x480 60Hz
-        .h_total = 524,
-        .h_width = 480,
-        .freq = 60,
-        .vgaPxClk = 25175000
-    }
+static struct video_mode_t video_mode = {
+    // 640x480 60Hz
+    .h_total = 524,
+    .h_width = 480,
+    .freq = 60,
+    .vgaPxClk = 25175000
 };
-
-struct video_mode_t __not_in_flash_func(graphics_get_video_mode)(int mode) {
-    return video_mode[0];
-}
-
-int __not_in_flash_func(get_video_mode)() {
-    return 0;
-}
 
 void __not_in_flash_func(vsync_handler)() {
     // Called from DMA IRQ at frame boundary.
@@ -305,16 +296,51 @@ static void pio_set_x(PIO pio, const int sm, uint32_t v) {
     pio_sm_exec(pio, sm, instr_mov);
 }
 
+static inline void* __not_in_flash_func(nf_memset)(void* ptr, int value, size_t len)
+{
+    uint8_t* p = (uint8_t*)ptr;
+    uint8_t v8 = (uint8_t)value;
+
+    // --- выравниваем до 4 байт ---
+    while (len && ((uintptr_t)p & 3)) {
+        *p++ = v8;
+        len--;
+    }
+
+    // --- основной 32-битный цикл ---
+    if (len >= 4) {
+        uint32_t v32 = v8;
+        v32 |= v32 << 8;
+        v32 |= v32 << 16;
+
+        uint32_t* p32 = (uint32_t*)p;
+        size_t n32 = len >> 2;
+
+        while (n32--) {
+            *p32++ = v32;
+        }
+
+        p = (uint8_t*)p32;
+        len &= 3;
+    }
+
+    // --- хвост ---
+    while (len--) {
+        *p++ = v8;
+    }
+
+    return ptr;
+}
+
 static void __not_in_flash_func(dma_handler_HDMI)() {
     static uint32_t inx_buf_dma;
     static uint line = 0;
-    struct video_mode_t mode = graphics_get_video_mode(get_video_mode());
     irq_inx++;
 
     dma_hw->ints0 = 1u << dma_chan_ctrl;
     dma_channel_set_read_addr(dma_chan_ctrl, &DMA_BUF_ADDR[inx_buf_dma & 1], false);
 
-    if (line >= mode.h_total ) {
+    if (line >= video_mode.h_total ) {
         line = 0;
         vsync_handler();
     } else {
@@ -326,7 +352,7 @@ static void __not_in_flash_func(dma_handler_HDMI)() {
 
     uint8_t* activ_buf = (uint8_t *)dma_lines[inx_buf_dma & 1];
 
-    if (line < mode.h_width ) {
+    if (line < video_mode.h_width ) {
         uint8_t* output_buffer = activ_buf + 72; //для выравнивания синхры;
         int y = line >> 1;
         
@@ -341,7 +367,7 @@ static void __not_in_flash_func(dma_handler_HDMI)() {
             }
         } else {
             // No buffer - fill with background color
-            memset(output_buffer, 0, SCREEN_WIDTH);
+            nf_memset(output_buffer, 0, SCREEN_WIDTH);
         }
         
         //ССИ
@@ -349,9 +375,9 @@ static void __not_in_flash_func(dma_handler_HDMI)() {
 
         // --|_|---|_|---|_|----
         //---|___________|-----
-        memset(activ_buf + 48,BASE_HDMI_CTRL_INX, 24);
-        memset(activ_buf,BASE_HDMI_CTRL_INX + 1, 48);
-        memset(activ_buf + 392,BASE_HDMI_CTRL_INX, 8);
+        nf_memset(activ_buf + 48,BASE_HDMI_CTRL_INX, 24);
+        nf_memset(activ_buf,BASE_HDMI_CTRL_INX + 1, 48);
+        nf_memset(activ_buf + 392,BASE_HDMI_CTRL_INX, 8);
 
         //без выравнивания
         // --|_|---|_|---|_|----
@@ -366,8 +392,8 @@ static void __not_in_flash_func(dma_handler_HDMI)() {
             //для выравнивания синхры
             // --|_|---|_|---|_|----
             //---|___________|-----
-            memset(activ_buf + 48,BASE_HDMI_CTRL_INX + 2, 352);
-            memset(activ_buf,BASE_HDMI_CTRL_INX + 3, 48);
+            nf_memset(activ_buf + 48,BASE_HDMI_CTRL_INX + 2, 352);
+            nf_memset(activ_buf,BASE_HDMI_CTRL_INX + 3, 48);
             //без выравнивания
             // --|_|---|_|---|_|----
             //-------|___________|----
@@ -380,8 +406,8 @@ static void __not_in_flash_func(dma_handler_HDMI)() {
             //ССИ без изображения
             //для выравнивания синхры
 
-            memset(activ_buf + 48,BASE_HDMI_CTRL_INX, 352);
-            memset(activ_buf,BASE_HDMI_CTRL_INX + 1, 48);
+            nf_memset(activ_buf + 48,BASE_HDMI_CTRL_INX, 352);
+            nf_memset(activ_buf,BASE_HDMI_CTRL_INX + 1, 48);
 
             // memset(activ_buf,BASE_HDMI_CTRL_INX,328);
             // memset(activ_buf+328,BASE_HDMI_CTRL_INX+1,48);
@@ -531,7 +557,7 @@ static inline bool hdmi_init() {
     sm_config_set_out_shift(&c_c, true, true, 30);
     sm_config_set_fifo_join(&c_c, PIO_FIFO_JOIN_TX);
 
-    int hdmi_hz = graphics_get_video_mode(get_video_mode()).freq;
+    int hdmi_hz = video_mode.freq;
     sm_config_set_clkdiv(&c_c, (clock_get_hz(clk_sys) / 252000000.0f) * (60 / hdmi_hz));
     pio_sm_init(PIO_VIDEO, SM_video, offs_prg0, &c_c);
     pio_sm_set_enabled(PIO_VIDEO, SM_video, true);

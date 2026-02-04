@@ -85,7 +85,6 @@ void graphics_restore_sync_colors(void);
 void startVIDEO(uint8_t vol);
 void set_palette(uint8_t n); // переключение палитр
 
-struct video_mode_t graphics_get_video_mode(int mode);
 void graphics_set_bgcolor(uint32_t color888);
 
 
