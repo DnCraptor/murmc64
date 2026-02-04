@@ -32,14 +32,16 @@ namespace fs = std::filesystem;
 ROMCartridge::ROMCartridge(unsigned num_banks, unsigned bank_size) : numBanks(num_banks), bankSize(bank_size)
 {
 	// Allocate ROM
-	rom = new uint8_t[num_banks * bank_size];
+	rom = (uint8_t*)psram_malloc(num_banks * bank_size);
+	// new uint8_t[num_banks * bank_size];
 	memset(rom, 0xff, num_banks * bank_size);
 }
 
 ROMCartridge::~ROMCartridge()
 {
 	// Free ROM
-	delete[] rom;
+	//delete[] rom;
+	psram_free(rom);
 }
 
 
