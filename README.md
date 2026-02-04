@@ -1,6 +1,6 @@
 # MurmC64
 
-Commodore 64 emulator for Raspberry Pi Pico 2 (RP2350) with HDMI output, SD card, and PS/2 keyboard.
+Commodore 64 emulator for Raspberry Pi Pico 2 (RP2350) with HDMI/VGA output, SD card, and PS/2 keyboard.
 
 Based on [Frodo4](https://frodo.cebix.net/) by Christian Bauer — a portable Commodore 64 emulator.
 
@@ -16,22 +16,29 @@ Both boards provide all necessary peripherals out of the box—no additional wir
 ## Features
 
 - Full Commodore 64 PAL emulation (50 Hz)
-- Native 640x480 (320x240) HDMI video output via PIO
+- **HDMI video output** — Native 640x480 (320x240) via PIO
+- **VGA video output** — Native 640x480 (320x240) via PIO (active accent color resistor DAC)
 - 8MB QSPI PSRAM support for C64 RAM and disk images
 - SD card support for D64/D81 disk images
 - PS/2 and USB keyboard input
 - NES/SNES gamepad support (directly and via USB)
-- I2S audio output with SID emulation
+- **I2S audio output** — High-quality SID emulation via external DAC
+- **PWM audio output** — SID emulation without external DAC (directly via GPIO)
 - [Murmulator OS 2](https://murmulator.ru) support (m1p2/m2p2 firmware format)
+- Multiple CPU speed options: 378, 428 (VGA only), 504 MHz
 
 ## Hardware Requirements
 
 - **Raspberry Pi Pico 2** (RP2350) or compatible board
 - **8MB QSPI PSRAM** (mandatory!)
-- **HDMI connector** (directly connected via resistors, no HDMI encoder needed)
+- **Video output** (choose one):
+  - **HDMI connector** — directly connected via 270Ω resistors (no encoder needed)
+  - **VGA connector** — accent color resistor DAC
 - **SD card module** (SPI mode)
 - **PS/2 or USB keyboard**
-- **I2S DAC module** (e.g., TDA1387) for audio output
+- **Audio output** (choose one):
+  - **I2S DAC module** (e.g., TDA1387) — recommended for high-quality audio
+  - **PWM audio** — no external DAC needed, directly via GPIO pins
 
 ### PSRAM Options
 
@@ -58,6 +65,9 @@ Two GPIO layouts are supported: **M1** and **M2**. The PSRAM pin is auto-detecte
 | D1+    | 11      | 17      |
 | D2-    | 12      | 18      |
 | D2+    | 13      | 19      |
+
+### VGA (accent color resistor DAC)
+VGA uses the same base pins as HDMI. See Murmulator hardware documentation for resistor DAC wiring.
 
 ### SD Card (SPI mode)
 | Signal  | M1 GPIO | M2 GPIO |
@@ -87,6 +97,12 @@ Two GPIO layouts are supported: **M1** and **M2**. The PSRAM pin is auto-detecte
 | BCLK   | 27      | 10      |
 | LRCLK  | 28      | 11      |
 
+### PWM Audio
+| Signal | M1 GPIO | M2 GPIO |
+|--------|---------|---------|
+| RIGHT  | 26      | 10      |
+| LEFT   | 27      | 11      |
+
 ## Building
 
 ### Prerequisites
@@ -108,31 +124,38 @@ git submodule update --init --recursive
 # Build using the build script (development build with USB serial debug)
 ./build.sh
 
-# Or build manually with CMake (default: 252 MHz CPU, 133 MHz PSRAM)
+# Or build manually with CMake
 mkdir build && cd build
-cmake -DPICO_PLATFORM=rp2350 -DCPU_SPEED=252 -DPSRAM_SPEED=133 ..
+cmake -DPICO_PLATFORM=rp2350 \
+      -DBOARD_VARIANT=M1 \
+      -DVIDEO_TYPE=VGA \
+      -DAUDIO_TYPE=PWM \
+      -DCPU_SPEED=378 ..
 make -j$(nproc)
 ```
 
 ### Release Builds
 
-To build both board variants (M1/M2) with version numbering and USB HID enabled:
+To build all firmware variants with version numbering and USB HID enabled:
 
 ```bash
 ./release.sh
 ```
 
-This creates versioned firmware files in the `release/` directory:
+This creates versioned firmware archives in the `release/` directory:
 
-**UF2 files** (for direct flashing via BOOTSEL):
-- `murmc64_m1_X_XX.uf2`
-- `murmc64_m2_X_XX.uf2`
+- `murmc64_m1_X_XX.zip` — All M1 board variants
+- `murmc64_m2_X_XX.zip` — All M2 board variants
 
-**MOS2 files** (for Murmulator OS):
-- `murmc64_m1_X_XX.m1p2`
-- `murmc64_m2_X_XX.m2p2`
+Each archive contains firmware for all combinations:
+- **Video**: VGA, HDMI
+- **Audio**: I2S, PWM
+- **CPU Speed**: 378, 428 (VGA only), 504 MHz
+- **Format**: UF2 (BOOTSEL) and MOS2 (Murmulator OS)
 
-Default configuration: 252 MHz CPU, 133 MHz PSRAM (stable, no overclock required).
+Filename format: `murmc64_mX_video_audio_speedmhz_version.{uf2,m1p2,m2p2}`
+
+Example: `murmc64_m1_vga_pwm_378mhz_1_02.uf2`
 
 ### Flashing
 
@@ -219,9 +242,10 @@ GNU General Public License v2 or later. See [LICENSE](LICENSE) for details.
 This project is based on:
 - [Frodo4](https://frodo.cebix.net/) by Christian Bauer — Portable Commodore 64 emulator
 
-## Author
+## Authors
 
-Mikhail Matveev <<xtreme@rh1.tech>>
+- Mikhail Matveev <<xtreme@rh1.tech>>
+- [DnCraptor](https://github.com/dncraptor/) — VGA driver, PWM audio, build system improvements
 
 ## Acknowledgments
 

@@ -3,21 +3,28 @@
 #
 # release.sh - Build release variants of MurmC64
 #
-# Creates firmware files for each board variant (M1, M2):
-#   - 252 MHz CPU, 133 MHz PSRAM (stable configuration)
+# Build matrix:
+#   - Board variants: M1, M2
+#   - Video types: VGA, HDMI
+#   - Audio types: I2S, PWM
+#   - MOS2 modes: OFF, ON
+#   - CPU speeds: 378, 428, 504 MHz (428 only for VGA)
 #
 # Output formats:
 #   - UF2 files for direct flashing via BOOTSEL mode
-#   - m1p2/m2p2 files for Murmulator OS
+#   - m1p2/m2p2 files for Murmulator OS (when MOS2=ON)
 #
 # All builds include USB HID support (keyboard/mouse via USB).
 # PS/2 keyboard and NES gamepad are also supported simultaneously.
 # USB Serial debug output is DISABLED in release builds.
 #
-# Output format: murmc64_mX_A_BB.{uf2,m1p2,m2p2}
-#   X  = Board variant (1 or 2)
-#   A  = Major version
-#   BB = Minor version (zero-padded)
+# Output format: murmc64_mX_VIDEO_AUDIO_CPUmhz_A_BB.{uf2,m1p2,m2p2}
+#   X     = Board variant (1 or 2)
+#   VIDEO = vga or hdmi
+#   AUDIO = i2s or pwm
+#   CPU   = CPU speed in MHz
+#   A     = Major version
+#   BB    = Minor version (zero-padded)
 #
 
 set -e
@@ -99,132 +106,117 @@ echo "$MAJOR $MINOR" > "$VERSION_FILE"
 RELEASE_DIR="$SCRIPT_DIR/release"
 mkdir -p "$RELEASE_DIR"
 
-# Build configurations: "BOARD CPU_SPEED PSRAM_SPEED DESCRIPTION"
-CONFIGS=(
-    "M1 252 133 stable"
-    "M2 252 133 stable"
-)
+# Build matrix configuration
+BOARD_VARIANTS=(M1 M2)
+VIDEO_TYPES=(VGA HDMI)
+AUDIO_TYPES=(I2S PWM)
+MOS2_MODES=(OFF ON)
+CPU_SPEEDS=(378 428 504)
+
+# Calculate total builds (428 MHz only valid for VGA)
+# VGA: 2 boards × 2 audio × 2 MOS2 × 3 speeds = 24
+# HDMI: 2 boards × 2 audio × 2 MOS2 × 2 speeds = 16
+TOTAL_BUILDS=40
 
 BUILD_COUNT=0
-# Total builds: UF2 + MOS2 versions (2x configs)
-TOTAL_BUILDS=$((${#CONFIGS[@]} * 2))
+FAILED_BUILDS=0
 
 echo ""
-echo -e "${YELLOW}Building $TOTAL_BUILDS firmware variants (UF2 + MOS2)...${NC}"
+echo -e "${YELLOW}Building $TOTAL_BUILDS firmware variants...${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-echo ""
-echo -e "${CYAN}=== Building UF2 firmware files ===${NC}"
+for BOARD in "${BOARD_VARIANTS[@]}"; do
+    for VIDEO in "${VIDEO_TYPES[@]}"; do
+        for AUDIO in "${AUDIO_TYPES[@]}"; do
+            for MOS2 in "${MOS2_MODES[@]}"; do
+                for CPU in "${CPU_SPEEDS[@]}"; do
 
-for config in "${CONFIGS[@]}"; do
-    read -r BOARD CPU PSRAM DESC <<< "$config"
+                    # Skip invalid: CPU=428 only for VGA
+                    if [[ "$CPU" == "428" && "$VIDEO" != "VGA" ]]; then
+                        continue
+                    fi
 
-    BUILD_COUNT=$((BUILD_COUNT + 1))
+                    BUILD_COUNT=$((BUILD_COUNT + 1))
 
-    # Board variant number
-    if [[ "$BOARD" == "M1" ]]; then
-        BOARD_NUM=1
-    else
-        BOARD_NUM=2
-    fi
+                    # Board variant number and MOS2 extension
+                    if [[ "$BOARD" == "M1" ]]; then
+                        BOARD_NUM=1
+                        MOS2_EXT="m1p2"
+                    else
+                        BOARD_NUM=2
+                        MOS2_EXT="m2p2"
+                    fi
 
-    # Output filename (simplified - single speed configuration)
-    OUTPUT_NAME="murmc64_m${BOARD_NUM}_${VERSION}.uf2"
+                    # Lowercase video/audio for filename
+                    VIDEO_LC=$(echo "$VIDEO" | tr '[:upper:]' '[:lower:]')
+                    AUDIO_LC=$(echo "$AUDIO" | tr '[:upper:]' '[:lower:]')
 
-    echo ""
-    echo -e "${CYAN}[$BUILD_COUNT/$TOTAL_BUILDS] Building: $OUTPUT_NAME${NC}"
-    echo -e "  Board: $BOARD | CPU: ${CPU} MHz | PSRAM: ${PSRAM} MHz | $DESC"
+                    # Output filename
+                    if [[ "$MOS2" == "ON" ]]; then
+                        OUTPUT_NAME="murmc64_m${BOARD_NUM}_${VIDEO_LC}_${AUDIO_LC}_${CPU}mhz_${VERSION}.${MOS2_EXT}"
+                    else
+                        OUTPUT_NAME="murmc64_m${BOARD_NUM}_${VIDEO_LC}_${AUDIO_LC}_${CPU}mhz_${VERSION}.uf2"
+                    fi
 
-    # Clean and create build directory
-    rm -rf build
-    mkdir build
-    cd build
+                    echo ""
+                    echo -e "${CYAN}[$BUILD_COUNT/$TOTAL_BUILDS] Building: $OUTPUT_NAME${NC}"
+                    echo -e "  Board: $BOARD | Video: $VIDEO | Audio: $AUDIO | CPU: ${CPU} MHz | MOS2: $MOS2"
 
-    # Configure with CMake
-    # Release builds: USB_HID_ENABLED=1, DEBUG_LOGS_ENABLED=OFF
-    cmake .. \
-        -DPICO_PLATFORM=rp2350 \
-        -DBOARD_VARIANT="$BOARD" \
-        -DCPU_SPEED="$CPU" \
-        -DPSRAM_SPEED="$PSRAM" \
-        -DUSB_HID_ENABLED=1 \
-        -DDEBUG_LOGS_ENABLED=OFF \
-        -DFIRMWARE_VERSION="v${VERSION_DOT}" \
-        > /dev/null 2>&1
+                    # Clean and create build directory
+                    rm -rf build
+                    mkdir build
+                    cd build
 
-    # Build
-    if make -j8 > /dev/null 2>&1; then
-        # Copy UF2 to release directory
-        if [[ -f "murmc64.uf2" ]]; then
-            cp "murmc64.uf2" "$RELEASE_DIR/$OUTPUT_NAME"
-            echo -e "  ${GREEN}✓ Success${NC} → release/$OUTPUT_NAME"
-        else
-            echo -e "  ${RED}✗ UF2 not found${NC}"
-        fi
-    else
-        echo -e "  ${RED}✗ Build failed${NC}"
-    fi
+                    # Configure with CMake
+                    CMAKE_MOS2_FLAG=""
+                    if [[ "$MOS2" == "ON" ]]; then
+                        CMAKE_MOS2_FLAG="-DMOS2=ON"
+                    fi
 
-    cd "$SCRIPT_DIR"
-done
+                    cmake .. \
+                        -DPICO_PLATFORM=rp2350 \
+                        -DBOARD_VARIANT="$BOARD" \
+                        -DVIDEO_TYPE="$VIDEO" \
+                        -DAUDIO_TYPE="$AUDIO" \
+                        -DCPU_SPEED="$CPU" \
+                        -DUSB_HID_ENABLED=1 \
+                        -DDEBUG_LOGS_ENABLED=OFF \
+                        -DFIRMWARE_VERSION="v${VERSION_DOT}" \
+                        $CMAKE_MOS2_FLAG \
+                        > /dev/null 2>&1
 
-echo ""
-echo -e "${CYAN}=== Building MOS2 firmware files (Murmulator OS) ===${NC}"
+                    # Build
+                    if make -j8 > /dev/null 2>&1; then
+                        # Output goes to bin/Release/ per CMakeLists.txt
+                        BIN_DIR="$SCRIPT_DIR/bin/Release"
 
-for config in "${CONFIGS[@]}"; do
-    read -r BOARD CPU PSRAM DESC <<< "$config"
+                        # Determine source file based on CMakeLists.txt naming:
+                        # m{1,2}p2-murmc64-{VIDEO}-{CPU}MHz-{AUDIO}-v{VERSION}[.m{1,2}p2][.uf2]
+                        # MOS2 builds rename .uf2 to remove extension
+                        if [[ "$MOS2" == "ON" ]]; then
+                            SRC_FILE="$BIN_DIR/${MOS2_EXT}-murmc64-${VIDEO}-${CPU}MHz-${AUDIO}-v${VERSION_DOT}.${MOS2_EXT}"
+                        else
+                            SRC_FILE="$BIN_DIR/${MOS2_EXT}-murmc64-${VIDEO}-${CPU}MHz-${AUDIO}-v${VERSION_DOT}.uf2"
+                        fi
 
-    BUILD_COUNT=$((BUILD_COUNT + 1))
+                        if [[ -f "$SRC_FILE" ]]; then
+                            cp "$SRC_FILE" "$RELEASE_DIR/$OUTPUT_NAME"
+                            echo -e "  ${GREEN}✓ Success${NC} → release/$OUTPUT_NAME"
+                        else
+                            echo -e "  ${RED}✗ Output file not found: $SRC_FILE${NC}"
+                            FAILED_BUILDS=$((FAILED_BUILDS + 1))
+                        fi
+                    else
+                        echo -e "  ${RED}✗ Build failed${NC}"
+                        FAILED_BUILDS=$((FAILED_BUILDS + 1))
+                    fi
 
-    # Board variant number and MOS2 extension
-    if [[ "$BOARD" == "M1" ]]; then
-        BOARD_NUM=1
-        MOS2_EXT="m1p2"
-    else
-        BOARD_NUM=2
-        MOS2_EXT="m2p2"
-    fi
+                    cd "$SCRIPT_DIR"
 
-    # Output filename for MOS2 (simplified - single speed configuration)
-    OUTPUT_NAME="murmc64_m${BOARD_NUM}_${VERSION}.${MOS2_EXT}"
-
-    echo ""
-    echo -e "${CYAN}[$BUILD_COUNT/$TOTAL_BUILDS] Building: $OUTPUT_NAME${NC}"
-    echo -e "  Board: $BOARD | CPU: ${CPU} MHz | PSRAM: ${PSRAM} MHz | $DESC | MOS2"
-
-    # Clean and create build directory
-    rm -rf build
-    mkdir build
-    cd build
-
-    # Configure with CMake (MOS2 enabled)
-    cmake .. \
-        -DPICO_PLATFORM=rp2350 \
-        -DBOARD_VARIANT="$BOARD" \
-        -DCPU_SPEED="$CPU" \
-        -DPSRAM_SPEED="$PSRAM" \
-        -DUSB_HID_ENABLED=1 \
-        -DDEBUG_LOGS_ENABLED=OFF \
-        -DFIRMWARE_VERSION="v${VERSION_DOT}" \
-        -DMOS2=ON \
-        > /dev/null 2>&1
-
-    # Build
-    if make -j8 > /dev/null 2>&1; then
-        # Copy UF2 to release directory with MOS2 extension
-        # The build produces murmc64.m1p2.uf2 or murmc64.m2p2.uf2
-        MOS2_BUILD_NAME="murmc64.${MOS2_EXT}"
-        if [[ -f "${MOS2_BUILD_NAME}.uf2" ]]; then
-            cp "${MOS2_BUILD_NAME}.uf2" "$RELEASE_DIR/$OUTPUT_NAME"
-            echo -e "  ${GREEN}✓ Success${NC} → release/$OUTPUT_NAME"
-        else
-            echo -e "  ${RED}✗ ${MOS2_EXT} file not found${NC}"
-        fi
-    else
-        echo -e "  ${RED}✗ Build failed${NC}"
-    fi
-
-    cd "$SCRIPT_DIR"
+                done
+            done
+        done
+    done
 done
 
 # Clean up build directory
@@ -232,14 +224,48 @@ rm -rf build
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e "${GREEN}Release build complete!${NC}"
+if [[ $FAILED_BUILDS -eq 0 ]]; then
+    echo -e "${GREEN}Release build complete! All $BUILD_COUNT builds successful.${NC}"
+else
+    echo -e "${YELLOW}Release build complete. ${GREEN}$((BUILD_COUNT - FAILED_BUILDS))${NC} successful, ${RED}$FAILED_BUILDS${NC} failed.${NC}"
+fi
+
+# Create platform ZIP archives
 echo ""
-echo "Release files in: $RELEASE_DIR/"
+echo -e "${CYAN}=== Creating platform archives ===${NC}"
+
+cd "$RELEASE_DIR"
+
+# M1 archive
+M1_ZIP="murmc64_m1_${VERSION}.zip"
+rm -f "$M1_ZIP"
+M1_FILES=$(ls murmc64_m1_*_${VERSION}.* 2>/dev/null)
+if [[ -n "$M1_FILES" ]]; then
+    zip -q "$M1_ZIP" $M1_FILES
+    M1_COUNT=$(echo "$M1_FILES" | wc -w | tr -d ' ')
+    echo -e "  ${GREEN}✓${NC} $M1_ZIP ($M1_COUNT files)"
+    rm -f $M1_FILES
+fi
+
+# M2 archive
+M2_ZIP="murmc64_m2_${VERSION}.zip"
+rm -f "$M2_ZIP"
+M2_FILES=$(ls murmc64_m2_*_${VERSION}.* 2>/dev/null)
+if [[ -n "$M2_FILES" ]]; then
+    zip -q "$M2_ZIP" $M2_FILES
+    M2_COUNT=$(echo "$M2_FILES" | wc -w | tr -d ' ')
+    echo -e "  ${GREEN}✓${NC} $M2_ZIP ($M2_COUNT files)"
+    rm -f $M2_FILES
+fi
+
+cd "$SCRIPT_DIR"
+
 echo ""
-echo "UF2 files (for BOOTSEL flashing):"
-ls -la "$RELEASE_DIR"/murmc64_m?_${VERSION}.uf2 2>/dev/null | awk '{print "  " $9 " (" $5 " bytes)"}'
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "Release archives in: ${CYAN}$RELEASE_DIR/${NC}"
 echo ""
-echo "MOS2 files (for Murmulator OS):"
-ls -la "$RELEASE_DIR"/murmc64_m?_${VERSION}.m?p2 2>/dev/null | awk '{print "  " $9 " (" $5 " bytes)"}'
+ls -la "$RELEASE_DIR"/murmc64_m?_${VERSION}.zip 2>/dev/null | awk '{print "  " $NF " (" $5 " bytes)"}'
 echo ""
 echo -e "Version: ${CYAN}${VERSION_DOT}${NC}"
+echo ""
+echo "Build matrix: 2 boards × 2 video × 2 audio × 2 MOS2 × 3 speeds (428 MHz VGA only)"
