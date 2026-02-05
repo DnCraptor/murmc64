@@ -34,7 +34,7 @@
  */
 
 // Default to M1 if no config specified
-#if !defined(BOARD_M1) && !defined(BOARD_M2)
+#if !defined(BOARD_M1) && !defined(BOARD_M2)&& !defined(BOARD_PC)
 #define BOARD_M1
 #endif
 
@@ -162,6 +162,36 @@ static inline uint get_psram_pin(void) {
 #define PWM_LEFT_PIN 11
 
 #endif // BOARD_M2
+
+//=============================================================================
+// PC Layout Configuration
+//=============================================================================
+#ifdef BOARD_PC
+
+// HDMI Pins
+#define HDMI_PIN_CLKN 12
+
+#define HDMI_BASE_PIN HDMI_PIN_CLKN
+
+// SD Card Pins
+#define SDCARD_PIN_CLK    6
+#define SDCARD_PIN_CMD    7
+#define SDCARD_PIN_D0     4
+#define SDCARD_PIN_D3     22
+
+// PS/2 Keyboard Pins
+#define PS2_PIN_CLK  0
+#define PS2_PIN_DATA 1
+
+// NES/SNES Gamepad Pins (directly after HDMI pins)
+#define NESPAD_GPIO_CLK   5
+#define NESPAD_GPIO_DATA  20
+#define NESPAD_GPIO_LATCH 9
+
+#define PWM_RIGHT_PIN 27
+#define PWM_LEFT_PIN 28
+
+#endif // BOARD_PC
 
 //=============================================================================
 // Commodore 64 Display Configuration
