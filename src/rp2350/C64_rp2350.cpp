@@ -70,16 +70,16 @@ C64::C64() : quit_requested(false), prefs_editor_requested(false), load_snapshot
 
     // Allocate RAM in PSRAM
     RAM = (uint8_t *)psram_malloc(C64_RAM_SIZE);
-    Basic = (uint8_t *)psram_malloc(BASIC_ROM_SIZE);
+    Basic = BuiltinBasicROM;
     Kernal = (uint8_t *)psram_malloc(KERNAL_ROM_SIZE);
-    Char = (uint8_t *)psram_malloc(CHAR_ROM_SIZE);
+    Char = BuiltinCharROM;
     ROM1541 = (uint8_t *)psram_malloc(DRIVE_ROM_SIZE);
     RAM1541 = (uint8_t *)psram_malloc(DRIVE_RAM_SIZE);
 
     // Color RAM in regular SRAM for fast VIC access
     Color = new uint8_t[COLOR_RAM_SIZE];
 
-    if (!RAM || !Basic || !Kernal || !Char || !Color || !ROM1541 || !RAM1541) {
+    if (!RAM || !Kernal || !Color || !ROM1541 || !RAM1541) {
         MII_DEBUG_PRINTF("ERROR: Failed to allocate C64 memory!\n");
         return;
     }
@@ -99,9 +99,7 @@ C64::C64() : quit_requested(false), prefs_editor_requested(false), load_snapshot
 
     // Load built-in ROMs
     MII_DEBUG_PRINTF("C64: Loading ROMs...\n");
-    memcpy(Basic, BuiltinBasicROM, BASIC_ROM_SIZE);
     memcpy(Kernal, BuiltinKernalROM, KERNAL_ROM_SIZE);
-    memcpy(Char, BuiltinCharROM, CHAR_ROM_SIZE);
     memcpy(ROM1541, BuiltinDriveROM, DRIVE_ROM_SIZE);
     MII_DEBUG_PRINTF("C64: ROMs loaded\n");
 
@@ -174,9 +172,7 @@ C64::~C64()
     delete TheDisplay;
 
     psram_free(RAM);
-    psram_free(Basic);
     psram_free(Kernal);
-    psram_free(Char);
     psram_free(ROM1541);
     psram_free(RAM1541);
     delete[] Color;

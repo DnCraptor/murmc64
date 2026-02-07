@@ -139,9 +139,9 @@ public:
 	void ShowNotification(std::string s);
 
 	uint8_t * RAM;				// C64 memories
-	uint8_t * Basic;
+	const uint8_t * Basic;
 	uint8_t * Kernal;
-	uint8_t * Char;
+	const uint8_t * Char;
 	uint8_t * Color;
 
 	uint8_t * RAM1541;			// 1541 memories
