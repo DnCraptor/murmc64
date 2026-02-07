@@ -27,8 +27,8 @@ for %%B in (%BOARD_VARIANTS%) do (
           if "%%V"=="VGA" if "%%B"=="Z0" set "SKIP=1"
           if "%%V"=="VGA" if "%%B"=="PC" set "SKIP=1"
 
-          REM --- skip invalid: PC does not support PWM audio ---
-          if "%%B"=="PC" if "%%A"=="PWM" set "SKIP=1"
+          REM --- skip invalid: PC does not support i2s audio ---
+          if "%%B"=="PC" if "%%A"=="I2S" set "SKIP=1"
 
           if "!SKIP!"=="1" (
             echo Skipping: %%B %%V %%A MOS2=%%M CPU=%%C
