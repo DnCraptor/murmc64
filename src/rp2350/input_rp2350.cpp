@@ -541,9 +541,11 @@ inline static uint8_t map_nes_to_c64(uint32_t pad) {
 
 void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joystick)
 {
+    constexpr uint8_t MOD_LSHIFT = 0x02;
+    constexpr uint8_t MOD_RSHIFT = 0x20;
     static bool f9_was_pressed = false;
     static bool f11_was_pressed = false;
-
+    uint8_t mods = 0;
 #if ENABLE_PS2_KEYBOARD
     // Poll PS/2 keyboard
     ps2kbd_tick();
@@ -663,16 +665,27 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     }
 
     // Handle shift key from modifiers and shift lock
-    uint8_t mods = ps2kbd_get_modifiers();
-    bool shift_active = (mods & 0x22) || input_state.shift_lock;  // L/R Shift or Shift Lock
-    if (shift_active) {
-        input_state.key_matrix[1] &= ~0x80;  // Left shift
-        input_state.rev_matrix[7] &= ~0x02;
-    } else {
-        input_state.key_matrix[1] |= 0x80;
-        input_state.rev_matrix[7] |= 0x02;
+    mods = ps2kbd_get_modifiers();
+    {
+        bool lshift = (mods & MOD_LSHIFT) || input_state.shift_lock;
+        bool rshift = (mods & MOD_RSHIFT);
+        // Left Shift (row 1, bit 7)
+        if (lshift) {
+            input_state.key_matrix[1] &= ~0x80;
+            input_state.rev_matrix[7] &= ~0x02;
+        } else {
+            input_state.key_matrix[1] |= 0x80;
+            input_state.rev_matrix[7] |= 0x02;
+        }
+        // Right Shift (row 6, bit 4)
+        if (rshift) {
+            input_state.key_matrix[6] &= ~0x10;
+            input_state.rev_matrix[4] &= ~0x40;
+        } else {
+            input_state.key_matrix[6] |= 0x10;
+            input_state.rev_matrix[4] |= 0x40;
+        }
     }
-
     // Handle Ctrl key (L-Ctrl only - R-Ctrl is used for joystick fire)
     if (mods & 0x01) {  // L-Ctrl only
         input_state.key_matrix[7] &= ~0x04;  // CTRL
@@ -812,14 +825,28 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     }
 
     // Handle shift key from USB modifiers and shift lock
-    uint8_t usb_mods = usbhid_wrapper_get_modifiers();
-    bool usb_shift_active = (usb_mods & 0x22) || input_state.shift_lock;  // L/R Shift or Shift Lock
-    if (usb_shift_active) {
-        input_state.key_matrix[1] &= ~0x80;  // Left shift
-        input_state.rev_matrix[7] &= ~0x02;
-    } else {
-        input_state.key_matrix[1] |= 0x80;
-        input_state.rev_matrix[7] |= 0x02;
+    uint8_t usb_mods = mods | usbhid_wrapper_get_modifiers();
+    {
+        bool lshift = (usb_mods & MOD_LSHIFT) || input_state.shift_lock;
+        bool rshift = (usb_mods & MOD_RSHIFT);
+
+        // Left Shift (row 1, bit 7)
+        if (lshift) {
+            input_state.key_matrix[1] &= ~0x80;
+            input_state.rev_matrix[7] &= ~0x02;
+        } else {
+            input_state.key_matrix[1] |= 0x80;
+            input_state.rev_matrix[7] |= 0x02;
+        }
+
+        // Right Shift (row 6, bit 4)
+        if (rshift) {
+            input_state.key_matrix[6] &= ~0x10;
+            input_state.rev_matrix[4] &= ~0x40;
+        } else {
+            input_state.key_matrix[6] |= 0x10;
+            input_state.rev_matrix[4] |= 0x40;
+        }
     }
 
     // Handle Ctrl key (L-Ctrl only - R-Ctrl is used for joystick fire)
