@@ -541,6 +541,7 @@ inline static uint8_t map_nes_to_c64(uint32_t pad) {
 
 void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joystick)
 {
+    static bool f9_was_pressed = false;
     static bool f11_was_pressed = false;
 
 #if ENABLE_PS2_KEYBOARD
@@ -553,7 +554,6 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         // Default: Gamepad1 -> Port2, Gamepad2 -> Port1
         // Swapped: Gamepad1 -> Port1, Gamepad2 -> Port2
         if (key == 0xF9) {  // F9
-            static bool f9_was_pressed = false;
             if (pressed && !f9_was_pressed) {
                 input_state.joy_port = (input_state.joy_port == 1) ? 2 : 1;
                 if (input_state.joy_port == 2) {
@@ -713,6 +713,18 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     int usb_pressed;
     unsigned char usb_key;
     while (usbhid_wrapper_get_key(&usb_pressed, &usb_key)) {
+        if (usb_key == 0xF9) {  // F9
+            if (pressed && !f9_was_pressed) {
+                input_state.joy_port = (input_state.joy_port == 1) ? 2 : 1;
+                if (input_state.joy_port == 2) {
+                    MII_DEBUG_PRINTF("Gamepads: Pad1->Port2, Pad2->Port1 (default)\n");
+                } else {
+                    MII_DEBUG_PRINTF("Gamepads: Pad1->Port1, Pad2->Port2 (swapped)\n");
+                }
+            }
+            f9_was_pressed = pressed;
+            continue;
+        }
         // F10 toggles disk UI
         if (usb_key == 0xFA) {  // F10
             static bool usb_f10_was_pressed = false;
