@@ -817,7 +817,7 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
 #endif
 
     // Poll both NES gamepads
-    nespad_read();
+  //  nespad_read();
 
     // Map NES pad to C64 joystick format
     // NES button masks (from nespad.h):
@@ -837,8 +837,9 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     };
 
     // Map both NES gamepads
-    uint8_t gamepad1_joy = map_nes_to_c64(nespad_state);
-    uint8_t gamepad2_joy = map_nes_to_c64(nespad_state2);
+    uint8_t gamepad1_joy = 0xFF; //map_nes_to_c64(nespad_state);
+    uint8_t gamepad2_joy = 0xFF; // map_nes_to_c64(nespad_state2);
+#if 0
 
 #ifdef USB_HID_ENABLED
     // Merge USB gamepad input (active-low, so AND the values)
@@ -893,6 +894,8 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     }
 #endif
 
+#endif
+
     // Apply gamepad swap (F9 toggles joy_port between 1 and 2)
     // joy_port == 2 (default): Gamepad1 -> Port2 (Joystick2), Gamepad2 -> Port1 (Joystick1)
     // joy_port == 1 (swapped): Gamepad1 -> Port1 (Joystick1), Gamepad2 -> Port2 (Joystick2)
@@ -909,6 +912,7 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     // Return state
     memcpy(key_matrix, input_state.key_matrix, 8);
     memcpy(rev_matrix, input_state.rev_matrix, 8);
+
     *joystick = input_state.joystick1;
 }
 
