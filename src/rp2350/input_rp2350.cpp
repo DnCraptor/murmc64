@@ -370,7 +370,7 @@ static struct {
 
     // Joystick port selection (1 or 2, directly maps to C64 port)
     // Most games use port 2, but some use port 1
-    int joy_port;  // 1 or 2
+    int joy_port = 2;  // 1 or 2
 
     // PS/2 state
     bool ps2_extended;
@@ -524,6 +524,19 @@ static void set_c64_key(int c64_key, bool pressed) {
         input_state.key_matrix[c64_byte] |= (1 << c64_bit);
         input_state.rev_matrix[c64_bit] |= (1 << c64_byte);
     }
+}
+
+// map NES pad state to C64 joystick format
+inline static uint8_t map_nes_to_c64(uint32_t pad) {
+    uint8_t joy = 0xFF;  // All released
+    if ((pad & DPAD_UP) && (pad & DPAD_DOWN)) return joy;
+    if ((pad & DPAD_LEFT) && (pad & DPAD_RIGHT)) return joy;
+    if (pad & DPAD_UP)    joy &= ~0x01;  // Up
+    if (pad & DPAD_DOWN)  joy &= ~0x02;  // Down
+    if (pad & DPAD_LEFT)  joy &= ~0x04;  // Left
+    if (pad & DPAD_RIGHT) joy &= ~0x08;  // Right
+    if (pad & (DPAD_A | DPAD_B)) joy &= ~0x10;  // A or B -> Fire
+    return joy;
 }
 
 void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joystick)
@@ -817,7 +830,7 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
 #endif
 
     // Poll both NES gamepads
-  //  nespad_read();
+    nespad_read();
 
     // Map NES pad to C64 joystick format
     // NES button masks (from nespad.h):
@@ -825,21 +838,9 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
     //   DPAD_A=0x000001, DPAD_B=0x000004, DPAD_START=0x000040, DPAD_SELECT=0x000010
     // C64 joystick: Up=0x01, Down=0x02, Left=0x04, Right=0x08, Fire=0x10
 
-    // Helper lambda to map NES pad state to C64 joystick format
-    auto map_nes_to_c64 = [](uint32_t pad) -> uint8_t {
-        uint8_t joy = 0xFF;  // All released
-        if (pad & DPAD_UP)    joy &= ~0x01;  // Up
-        if (pad & DPAD_DOWN)  joy &= ~0x02;  // Down
-        if (pad & DPAD_LEFT)  joy &= ~0x04;  // Left
-        if (pad & DPAD_RIGHT) joy &= ~0x08;  // Right
-        if (pad & (DPAD_A | DPAD_B)) joy &= ~0x10;  // A or B -> Fire
-        return joy;
-    };
-
     // Map both NES gamepads
-    uint8_t gamepad1_joy = 0xFF; //map_nes_to_c64(nespad_state);
-    uint8_t gamepad2_joy = 0xFF; // map_nes_to_c64(nespad_state2);
-#if 0
+    uint8_t gamepad1_joy = map_nes_to_c64(nespad_state);
+    uint8_t gamepad2_joy = map_nes_to_c64(nespad_state2);
 
 #ifdef USB_HID_ENABLED
     // Merge USB gamepad input (active-low, so AND the values)
@@ -892,8 +893,6 @@ void input_rp2350_poll(uint8_t *key_matrix, uint8_t *rev_matrix, uint8_t *joysti
         // R-Ctrl (0x10) or R-Alt (0x40) for fire button
         if (mods & 0x50) gamepad1_joy &= ~0x10;  // R-Ctrl=0x10, R-Alt=0x40
     }
-#endif
-
 #endif
 
     // Apply gamepad swap (F9 toggles joy_port between 1 and 2)
