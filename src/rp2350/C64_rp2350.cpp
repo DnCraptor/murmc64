@@ -69,12 +69,12 @@ C64::C64() : quit_requested(false), prefs_editor_requested(false), load_snapshot
     MII_DEBUG_PRINTF("C64: Allocating memory...\n");
 
     // Allocate RAM in PSRAM
-    RAM = (uint8_t *)psram_malloc(C64_RAM_SIZE);
+    RAM = (uint8_t *)malloc(C64_RAM_SIZE);
     Basic = BuiltinBasicROM;
     Kernal = (uint8_t *)psram_malloc(KERNAL_ROM_SIZE);
     Char = BuiltinCharROM;
     ROM1541 = (uint8_t *)psram_malloc(DRIVE_ROM_SIZE);
-    RAM1541 = (uint8_t *)psram_malloc(DRIVE_RAM_SIZE);
+    RAM1541 = (uint8_t *)malloc(DRIVE_RAM_SIZE);
 
     // Color RAM in regular SRAM for fast VIC access
     Color = new uint8_t[COLOR_RAM_SIZE];
@@ -171,10 +171,10 @@ C64::~C64()
     delete TheCPU;
     delete TheDisplay;
 
-    psram_free(RAM);
+    free(RAM);
     psram_free(Kernal);
     psram_free(ROM1541);
-    psram_free(RAM1541);
+    free(RAM1541);
     delete[] Color;
 }
 
