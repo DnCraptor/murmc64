@@ -454,11 +454,9 @@ int startscreen_show(startscreen_info_t *info) {
 
 #ifdef PSRAM_MAX_FREQ_MHZ
         snprintf(line, sizeof(line), "PSRAM: %lu MHz", (unsigned long)info->psram_mhz);
-        draw_centered_shadow(buffer, text_y, line, COLOR_TEXT_WHITE);
-#else
-        draw_centered_shadow("PSRAM: N/A", text_y, line, COLOR_TEXT_WHITE);
-#endif
+        draw_centered_shadow(line, text_y, line, COLOR_TEXT_WHITE);
         text_y += LINE_HEIGHT + 2;
+#endif
 
         snprintf(line, sizeof(line), "Board: %s", info->board_variant);
         draw_centered_shadow(buffer, text_y, line, COLOR_TEXT_WHITE);

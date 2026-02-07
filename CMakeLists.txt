@@ -39,7 +39,7 @@ option(MOS2 "MOS2 support" OFF)
 set(CPU_SPEED "504" CACHE STRING "CPU speed: 252, 378, 428 (VGA only), 504 MHz")
 
 # PSRAM speed configuration (84, 100, 133, 166 MHz target)
-set(PSRAM_SPEED "166" CACHE STRING "PSRAM max frequency in MHz: 84, 100, 133, 166")
+#set(PSRAM_SPEED "166" CACHE STRING "PSRAM max frequency in MHz: 84, 100, 133, 166")
 set(FLASH_MAX_FREQ_MHZ "66")
 
 if(VIDEO_TYPE STREQUAL "HDMI")

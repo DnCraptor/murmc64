@@ -45,7 +45,6 @@ extern "C" {
 // Platform-specific
 #include "Display_rp2350.h"
 #include "ROM_data.h"
-#include "psram_allocator.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -744,35 +743,61 @@ void c64_eject_cartridge(void)
 /*
  *  Load a PRG file directly into RAM
  */
-bool c64_load_prg(const uint8_t *data, uint32_t size)
+bool c64_load_prg_from_file(FIL *file)
 {
-    if (!TheC64 || !TheC64->RAM || size < 2) {
+    if (!TheC64 || !TheC64->RAM || !file)
         return false;
-    }
 
-    // First two bytes are load address (little endian)
-    uint16_t load_addr = data[0] | (data[1] << 8);
-    uint32_t prg_size = size - 2;
+    UINT br;
 
-    MII_DEBUG_PRINTF("c64_load_prg: Loading %lu bytes at $%04X\n",
-                     (unsigned long)prg_size, load_addr);
+    // 1. Read load address
+    uint8_t hdr[2];
+    if (f_read(file, hdr, 2, &br) != FR_OK || br != 2)
+        return false;
 
-    // Check bounds
-    if (load_addr + prg_size > C64_RAM_SIZE) {
+    uint16_t load_addr = hdr[0] | (hdr[1] << 8);
+
+    FSIZE_t file_size = f_size(file);
+    if (file_size < 3)
+        return false;
+
+    uint32_t prg_size = file_size - 2;
+
+    // 2. Clamp to RAM
+    if (load_addr >= C64_RAM_SIZE)
+        return false;
+
+    if (load_addr + prg_size > C64_RAM_SIZE)
         prg_size = C64_RAM_SIZE - load_addr;
+
+    MII_DEBUG_PRINTF(
+        "c64_load_prg: Loading %lu bytes at $%04X\n",
+        (unsigned long)prg_size, load_addr
+    );
+
+    // 3. Read directly into C64 RAM
+    uint8_t *dst = TheC64->RAM + load_addr;
+    uint32_t remaining = prg_size;
+
+    while (remaining) {
+        UINT chunk = remaining > 512 ? 512 : remaining;
+
+        if (f_read(file, dst, chunk, &br) != FR_OK || br != chunk)
+            return false;
+
+        dst += chunk;
+        remaining -= chunk;
     }
 
-    // Copy PRG data to RAM
-    memcpy(TheC64->RAM + load_addr, data + 2, prg_size);
-
-    // If loaded at BASIC start ($0801), set up BASIC pointers
+    // 4. BASIC pointers if $0801
     if (load_addr == 0x0801) {
         uint16_t end_addr = load_addr + prg_size;
-        TheC64->RAM[0x2d] = end_addr & 0xff;  // VARTAB low
-        TheC64->RAM[0x2e] = end_addr >> 8;    // VARTAB high
-        TheC64->RAM[0x2f] = TheC64->RAM[0x2d];  // ARYTAB
+
+        TheC64->RAM[0x2d] = end_addr & 0xff;  // VARTAB
+        TheC64->RAM[0x2e] = end_addr >> 8;
+        TheC64->RAM[0x2f] = TheC64->RAM[0x2d]; // ARYTAB
         TheC64->RAM[0x30] = TheC64->RAM[0x2e];
-        TheC64->RAM[0x31] = TheC64->RAM[0x2d];  // STREND
+        TheC64->RAM[0x31] = TheC64->RAM[0x2d]; // STREND
         TheC64->RAM[0x32] = TheC64->RAM[0x2e];
     }
 
@@ -809,74 +834,59 @@ void c64_type_string(const char *str)
  */
 void c64_load_file(const char *filename)
 {
-    if (!filename) return;
+    if (!filename)
+        return;
 
     MII_DEBUG_PRINTF("c64_load_file: %s\n", filename);
 
-    // Check file extension
     const char *ext = strrchr(filename, '.');
     if (!ext) {
         MII_DEBUG_PRINTF("No file extension\n");
         return;
     }
 
+    // ---------- PRG ----------
     if (strcasecmp(ext, ".prg") == 0) {
-        // Load PRG file into RAM
         FIL file;
-        FRESULT fr = f_open(&file, filename, FA_READ);
-        if (fr != FR_OK) {
+        if (f_open(&file, filename, FA_READ) != FR_OK) {
             MII_DEBUG_PRINTF("Failed to open PRG file\n");
             return;
         }
 
-        FSIZE_t size = f_size(&file);
-        if (size < 3 || size > 65536) {
-            f_close(&file);
-            MII_DEBUG_PRINTF("Invalid PRG size: %lu\n", (unsigned long)size);
-            return;
-        }
-
-        // Allocate buffer for PRG data
-        uint8_t *buffer = (uint8_t *)psram_malloc(size);
-        if (!buffer) {
-            f_close(&file);
-            MII_DEBUG_PRINTF("Failed to allocate PRG buffer\n");
-            return;
-        }
-
-        // Read PRG data
-        UINT bytes_read;
-        fr = f_read(&file, buffer, size, &bytes_read);
+        bool ok = c64_load_prg_from_file(&file);
         f_close(&file);
 
-        if (fr != FR_OK || bytes_read != size) {
-            psram_free(buffer);
-            MII_DEBUG_PRINTF("Failed to read PRG file\n");
+        if (!ok) {
+            MII_DEBUG_PRINTF("Failed to load PRG\n");
             return;
         }
 
-        // Load PRG into RAM
-        c64_load_prg(buffer, size);
-        psram_free(buffer);
-
-        // Queue RUN command (with Return key = 0x0D)
+        // Auto-RUN
         c64_type_string("RUN\r");
-    } else if (strcasecmp(ext, ".d64") == 0 || strcasecmp(ext, ".g64") == 0 || strcasecmp(ext, ".d81") == 0) {
-        // Mount disk image (D64, G64, or D81)
+        return;
+    }
+
+    // ---------- DISK ----------
+    if (strcasecmp(ext, ".d64") == 0 ||
+        strcasecmp(ext, ".g64") == 0 ||
+        strcasecmp(ext, ".d81") == 0) {
+
         c64_mount_disk(NULL, 0, filename);
-        // Queue LOAD"*",8,1 command
-        // C64 keyboard buffer is only 10 chars, LOAD"*",8,1 + CR is 12 chars
-        // Solution: Use C64 BASIC abbreviation - L + SHIFT+O (PETSCII $CF) = LOAD
-        // This gives us: L($4C) + shiftO($CF) + "*",8,1 + CR = exactly 10 chars
+
+        // LOAD"*",8,1 via abbreviation
         c64_type_string("L\xCF\"*\",8,1\r");
-    } else if (strcasecmp(ext, ".crt") == 0) {
-        // Load cartridge image
+        return;
+    }
+
+    // ---------- CARTRIDGE ----------
+    if (strcasecmp(ext, ".crt") == 0) {
         c64_load_cartridge(filename);
         if (TheC64)
             TheC64->ResetAndAutoStart();
-    } else {
-        MII_DEBUG_PRINTF("Unsupported file type: %s\n", ext);
+        return;
     }
+
+    MII_DEBUG_PRINTF("Unsupported file type: %s\n", ext);
 }
 
 /*

@@ -63,13 +63,6 @@
 #include "Display.h"
 #include "Prefs.h"
 
-#ifdef FRODO_RP2350
-extern "C" {
-#include "psram_allocator.h"
-}
-#endif
-
-
 // Test alignment on run-time for processors that can't access unaligned:
 #undef ALIGNMENT_CHECK
 
