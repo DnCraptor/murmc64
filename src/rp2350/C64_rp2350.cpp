@@ -68,18 +68,17 @@ C64::C64() : quit_requested(false), prefs_editor_requested(false), load_snapshot
 {
     MII_DEBUG_PRINTF("C64: Allocating memory...\n");
 
-    // Allocate RAM in PSRAM
     RAM = (uint8_t *)malloc(C64_RAM_SIZE);
-    Basic = BuiltinBasicROM;
-    Kernal = (uint8_t *)psram_malloc(KERNAL_ROM_SIZE);
-    Char = BuiltinCharROM;
-    ROM1541 = (uint8_t *)psram_malloc(DRIVE_ROM_SIZE);
     RAM1541 = (uint8_t *)malloc(DRIVE_RAM_SIZE);
+    Basic = BuiltinBasicROM;
+    Kernal = c64_fast_reset_rom;
+    Char = BuiltinCharROM;
+    ROM1541 = c64_1541_rom;
 
     // Color RAM in regular SRAM for fast VIC access
     Color = new uint8_t[COLOR_RAM_SIZE];
 
-    if (!RAM || !Kernal || !Color || !ROM1541 || !RAM1541) {
+    if (!RAM || !Color || !RAM1541) {
         MII_DEBUG_PRINTF("ERROR: Failed to allocate C64 memory!\n");
         return;
     }
@@ -97,19 +96,7 @@ C64::C64() : quit_requested(false), prefs_editor_requested(false), load_snapshot
     init_memory();
     MII_DEBUG_PRINTF("C64: Memory initialized\n");
 
-    // Load built-in ROMs
-    MII_DEBUG_PRINTF("C64: Loading ROMs...\n");
-    memcpy(Kernal, BuiltinKernalROM, KERNAL_ROM_SIZE);
-    memcpy(ROM1541, BuiltinDriveROM, DRIVE_ROM_SIZE);
-    MII_DEBUG_PRINTF("C64: ROMs loaded\n");
-
-    // Patch ROMs for IEC routines and fast reset
-    MII_DEBUG_PRINTF("C64: Patching ROMs...\n");
-    patch_roms(ThePrefs.FastReset, ThePrefs.Emul1541Proc, false);
-    MII_DEBUG_PRINTF("C64: ROMs patched\n");
-
     MII_DEBUG_PRINTF("C64: Creating chips...\n");
-
     // Create the chips
     MII_DEBUG_PRINTF("  Creating CPU...\n");
     TheCPU = new MOS6510(this, RAM, Basic, Kernal, Char, Color);
@@ -172,8 +159,6 @@ C64::~C64()
     delete TheDisplay;
 
     free(RAM);
-    psram_free(Kernal);
-    psram_free(ROM1541);
     free(RAM1541);
     delete[] Color;
 }
@@ -204,7 +189,7 @@ void C64::init_memory()
 
 /*
  *  Apply ROM patch
- */
+ *
 
 static void apply_patch(bool apply, uint8_t *rom, const uint8_t *builtin,
                         uint16_t offset, unsigned size, const uint8_t *patch)
@@ -225,8 +210,9 @@ static void apply_patch(bool apply, uint8_t *rom, const uint8_t *builtin,
  *  Patch ROMs for fast reset and IEC emulation
  */
 
-void C64::patch_roms(bool fast_reset, bool emul_1541_proc, bool auto_start)
+void C64::patch_roms(bool fast_reset, bool emul_1541_proc)
 {
+    /*
     // Fast reset patch - skip RAM test
     static const uint8_t fast_reset_patch[] = { 0xa0, 0x00 };
     apply_patch(fast_reset, Kernal, BuiltinKernalROM, 0x1d84,
@@ -269,6 +255,12 @@ void C64::patch_roms(bool fast_reset, bool emul_1541_proc, bool auto_start)
                 sizeof(drive_patch_1), drive_patch_1);
     apply_patch(true, ROM1541, BuiltinDriveROM, 0x2c9b,
                 sizeof(drive_patch_2), drive_patch_2);
+*/
+    FIL f;
+    f_open(&f, "/c64_fast_reset.rom", FA_CREATE_ALWAYS | FA_WRITE);
+    UINT bw;
+    f_write(&f, Kernal, KERNAL_ROM_SIZE, &bw);
+    f_close(&f);
 }
 
 
@@ -301,7 +293,7 @@ void C64::Reset(bool clear_memory)
 
 void C64::ResetAndAutoStart()
 {
-    patch_roms(ThePrefs.FastReset, ThePrefs.Emul1541Proc, true);
+//    patch_roms(ThePrefs.FastReset, ThePrefs.Emul1541Proc);
     Reset(true);
 }
 
@@ -329,9 +321,6 @@ void C64::NewPrefs(const Prefs *prefs)
     TheIEC->NewPrefs(prefs);
     TheGCRDisk->NewPrefs(prefs);
     TheSID->NewPrefs(prefs);
-
-    MII_DEBUG_PRINTF("NewPrefs: calling patch_roms with emul_1541=%d\n", prefs->Emul1541Proc);
-    patch_roms(prefs->FastReset, prefs->Emul1541Proc, prefs->AutoStart);
 
     if (ThePrefs.Emul1541Proc != prefs->Emul1541Proc) {
         MII_DEBUG_PRINTF("NewPrefs: Resetting 1541 CPU\n");

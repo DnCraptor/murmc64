@@ -57,7 +57,7 @@ struct MOS6510State;
 // 6510 emulation (C64)
 class MOS6510 {
 public:
-	MOS6510(C64 * c64, uint8_t * Ram, const uint8_t* Basic, uint8_t * Kernal, const uint8_t * Char, uint8_t * Color);
+	MOS6510(C64 * c64, uint8_t * Ram, const uint8_t* Basic, const uint8_t * Kernal, const uint8_t * Char, uint8_t * Color);
 
 	// Set pointers to other objects
 	void SetChips(MOS6569 * vic, MOS6581 * sid, MOS6526_1 * cia1, MOS6526_2 * cia2,
@@ -174,7 +174,7 @@ private:
 
 	uint8_t * ram;			// Pointer to main RAM
 	const uint8_t * basic_rom;	// Pointers to ROMs
-	uint8_t * kernal_rom;
+	const uint8_t * kernal_rom;
 	const uint8_t * char_rom;
 	uint8_t * color_ram;	// Pointer to color RAM
 
