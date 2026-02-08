@@ -30,11 +30,7 @@ namespace fs = std::filesystem;
 #endif
 
 #ifndef PSRAM_MAX_FREQ_MHZ
-#if PICO_RP2350
 static uint8_t small_buffer[0x4000] __aligned(4096);
-#else
-static uint8_t small_buffer[FLASH_SECTOR_SIZE] __aligned(4096);
-#endif
 static uint32_t requested_size = 0;
 // put it with 1MB offset (the firmaware is less than 400 kB, so more than 3 MB may be reused)
 #define CARTRIDGE_BASE (1ul << 20)

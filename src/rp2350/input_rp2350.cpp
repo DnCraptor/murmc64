@@ -642,10 +642,10 @@ void input_rp2350_poll_no_c64_acts()
                         int action = disk_ui_get_action();
                         const char *path = disk_loader_get_path(sel);
                         if (path) {
-                            c64_unmount_disk();
-                            c64_eject_cartridge();
                             if (action == 0) {
                                 // Load (run the disk/PRG)
+                                c64_unmount_disk();
+                                c64_eject_cartridge();
                                 MII_DEBUG_PRINTF("Loading disk: %s\n", path);
                                 c64_load_file(path);
                             } else {

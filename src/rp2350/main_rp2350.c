@@ -403,7 +403,7 @@ void hard_fault_handler_c(uint32_t *stack) {
     uint32_t lr = stack[5];
     uint32_t pc = stack[6];
     uint32_t psr = stack[7];
-
+/*
     printf("\n!!! HARD FAULT !!!\n");
     printf("PC=0x%08lX LR=0x%08lX PSR=0x%08lX\n",
            (unsigned long)pc, (unsigned long)lr, (unsigned long)psr);
@@ -411,11 +411,22 @@ void hard_fault_handler_c(uint32_t *stack) {
            (unsigned long)r0, (unsigned long)r1, (unsigned long)r2, (unsigned long)r3);
     printf("R12=0x%08lX SP=0x%08lX\n",
            (unsigned long)r12, (unsigned long)(uint32_t)stack);
-
+*/
     // Blink LED or hang forever
+#ifdef PICO_DEFAULT_LED_PIN
+    gpio_init(PICO_DEFAULT_LED_PIN);
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+    while (1) {
+        gpio_put(PICO_DEFAULT_LED_PIN, 1);
+        sleep_ms(100);
+        gpio_put(PICO_DEFAULT_LED_PIN, 0);
+        sleep_ms(100);
+    }
+#else
     while (1) {
         tight_loop_contents();
     }
+#endif
 }
 
 //=============================================================================
@@ -478,7 +489,7 @@ static void emulator_main_loop(void) {
     // Main emulation loop
     uint32_t frame_count = 0;
     uint32_t total_frames = 0;
-    bool first_frame = true;
+//    bool first_frame = true;
     uint32_t last_time = rp2350_get_ticks_ms();
 
     // Frame timing: PAL = 50 Hz = 20000 us per frame
@@ -501,9 +512,9 @@ static void emulator_main_loop(void) {
     while (!g_quit_requested) {
         if (!disk_ui_is_visible()) {
             // Run one frame of C64 emulation
-            if (first_frame) MII_DEBUG_PRINTF("Running first frame...\n");
+          //  if (first_frame) MII_DEBUG_PRINTF("Running first frame...\n");
             c64_run_frame();
-            if (first_frame) { MII_DEBUG_PRINTF("First frame done\n"); first_frame = false; }
+          //  if (first_frame) { MII_DEBUG_PRINTF("First frame done\n"); first_frame = false; }
 
             // Update audio (SID -> I2S)
             sid_i2s_update();
@@ -548,6 +559,7 @@ static void emulator_main_loop(void) {
 
     watchdog_disable();
 }
+
 
 //=============================================================================
 // Main Entry Point

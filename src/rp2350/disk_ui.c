@@ -206,7 +206,7 @@ static void draw_char(int x, int y, char c, uint8_t color) {
     const uint8_t *glyph = font_6x8[idx];
 
     for (int row = 0; row < 8; row++) {
-        if (y + row < 0 || y + row >= C64_DISPLAY_HEIGHT) continue;
+        if (y + row < 0 || y + row >= (C64_DISPLAY_HEIGHT - C64_CROP_TOP * 2)) continue;
         uint8_t bits = glyph[row];
         for (int col = 0; col < 6; col++) {
             if (x + col < 0 || x + col >= C64_DISPLAY_WIDTH) continue;
@@ -218,7 +218,7 @@ static void draw_char(int x, int y, char c, uint8_t color) {
 }
 
 // Draw a string
-static void draw_string(int x, int y, const char *str, uint8_t color) {
+void draw_string(int x, int y, const char *str, uint8_t color) {
     while (*str) {
         draw_char(x, y, *str, color);
         x += CHAR_WIDTH;

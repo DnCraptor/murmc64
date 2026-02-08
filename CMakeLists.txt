@@ -27,7 +27,7 @@ set(PICO_BOARD pico CACHE STRING "Board type")
 set(BOARD_VARIANT "M1" CACHE STRING "Board variant: M1, M2 or PC")
 
 # Video output type (VGA or HDMI)
-set(VIDEO_TYPE "HDMI" CACHE STRING "Video output: VGA or HDMI")
+set(VIDEO_TYPE "VGA" CACHE STRING "Video output: VGA or HDMI")
 
 # Audio output configuration (I2S or PWM)
 set(AUDIO_TYPE "PWM" CACHE STRING "Audio output: I2S or PWM")

@@ -57,9 +57,9 @@ C64 *TheC64 = nullptr;
 
 // External display pointer
 static Display *g_display = nullptr;
-static uint8_t g_RAM[C64_RAM_SIZE];
-static uint8_t g_RAM1541[DRIVE_RAM_SIZE];
-static uint8_t g_Color[COLOR_RAM_SIZE];
+static uint8_t g_RAM[C64_RAM_SIZE] __aligned(4);
+static uint8_t g_RAM1541[DRIVE_RAM_SIZE] __aligned(4);
+static uint8_t g_Color[COLOR_RAM_SIZE] __aligned(4);
 
 /*
  *  C64 Constructor (simplified for RP2350)
