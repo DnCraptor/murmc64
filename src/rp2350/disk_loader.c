@@ -26,7 +26,7 @@
 // Configuration
 //=============================================================================
 
-#define MAX_DISK_IMAGES     100
+#define MAX_DISK_IMAGES     20
 #define MAX_FILENAME_LEN    64
 #define DEFAULT_SCAN_PATH   "/c64"
 
@@ -48,7 +48,7 @@ static struct {
     disk_entry_t entries[MAX_DISK_IMAGES];
     int count;
     bool initialized;
-} disk_loader;
+} disk_loader; // sizeof(disk_loader) == 7208 (in case MAX_DISK_IMAGES=100)
 
 char current_scan_path[128] = DEFAULT_SCAN_PATH;
 

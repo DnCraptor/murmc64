@@ -632,7 +632,7 @@ bool c64_run_frame(void)
             c64->TheCIA2->CountTOD();
         }
     }
-
+#if 0
     // Debug: warn if we hit the safety limit
     if (line_count >= MAX_LINES_PER_FRAME) {
         static int overflow_count = 0;
@@ -651,10 +651,7 @@ bool c64_run_frame(void)
                ThePrefs.Emul1541Proc ? "ON" : "OFF",
                c64->TheCPU1541->Idle);
     }
-
-    // Update display
-    c64->TheDisplay->Update();
-
+#endif
     return true;
 }
 

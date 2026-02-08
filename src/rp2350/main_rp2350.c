@@ -24,7 +24,9 @@
 #include "hardware/vreg.h"
 #include "hardware/gpio.h"
 #include "hardware/watchdog.h"
+#if PICO_RP2350
 #include "hardware/structs/qmi.h"
+#endif
 
 // Drivers
 #include "HDMI.h"
@@ -143,6 +145,7 @@ static void core1_video_task(void) {
 //=============================================================================
 
 // Flash timing configuration for overclocking
+#if PICO_RP2350
 #ifndef FLASH_MAX_FREQ_MHZ
 #define FLASH_MAX_FREQ_MHZ 88
 #endif
@@ -165,18 +168,23 @@ static void __no_inline_not_in_flash_func(set_flash_timings)(int cpu_mhz) {
                         rxdelay << QMI_M0_TIMING_RXDELAY_LSB |
                         divisor << QMI_M0_TIMING_CLKDIV_LSB;
 }
+#endif
 
 static void __no_inline_not_in_flash_func(init_clocks)(void) {
     // Overclock BEFORE stdio_init_all() - matching murmgenesis approach
-#if CPU_CLOCK_MHZ > 252
     // Disable voltage limit for high voltages (>1.50V)
     vreg_disable_voltage_limit();
+#if CPU_CLOCK_MHZ > 252
+#if PICO_RP2350
     vreg_set_voltage(CPU_VOLTAGE);
     // Set flash timings before changing clock
     set_flash_timings(CPU_CLOCK_MHZ);
-    sleep_ms(100);  // Let voltage stabilize (longer delay for high voltage)
+#else
+    hw_set_bits(&vreg_and_chip_reset_hw->vreg,
+                VREG_AND_CHIP_RESET_VREG_VSEL_BITS);
 #endif
-
+#endif
+    sleep_ms(100);  // Let voltage stabilize (longer delay for high voltage)
     // Set system clock
     if (!set_sys_clock_khz(CPU_CLOCK_MHZ * 1000, false)) {
         // Fallback to safe speed if requested speed fails
@@ -232,6 +240,7 @@ static void __no_inline_not_in_flash_func(init_stdio)(void) {
 #endif
 }
 
+#if PICO_RP2350
 static void init_psram(void) {
     MII_DEBUG_PRINTF("Initializing PSRAM...\n");
 
@@ -253,6 +262,7 @@ static void init_psram(void) {
     // Reset PSRAM allocator
     psram_reset();
 }
+#endif
 
 static void init_graphics(void) {
     MII_DEBUG_PRINTF("Initializing HDMI graphics...\n");
@@ -475,6 +485,16 @@ static void emulator_main_loop(void) {
     const uint32_t FRAME_TIME_US = 20000;
     uint64_t next_frame_time = rp2350_get_ticks_us();
 
+#ifdef PICO_DEFAULT_LED_PIN
+    gpio_init(PICO_DEFAULT_LED_PIN);
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+    for (int i = 0; i < 6; i++) {
+        sleep_ms(33);
+        gpio_put(PICO_DEFAULT_LED_PIN, true);
+        sleep_ms(33);
+        gpio_put(PICO_DEFAULT_LED_PIN, false);
+    }
+#endif
     // Watchdog DISABLED for debugging
     // watchdog_enable(2000, true);
 
@@ -536,17 +556,6 @@ static void emulator_main_loop(void) {
 int main(void) {
     // Initialize system clocks first
     init_clocks();
-
-#ifdef PICO_DEFAULT_LED_PIN
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-    for (int i = 0; i < 6; i++) {
-        sleep_ms(33);
-        gpio_put(PICO_DEFAULT_LED_PIN, true);
-        sleep_ms(33);
-        gpio_put(PICO_DEFAULT_LED_PIN, false);
-    }
-#endif
 
     // Initialize stdio for debug output
     init_stdio();

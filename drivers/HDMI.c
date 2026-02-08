@@ -49,12 +49,6 @@ void graphics_set_shift(int x, int y) {
     graphics_buffer_shift_y = y;
 }
 
-static inline uint8_t* __not_in_flash_func(get_line_buffer)(int line) {
-    if (!graphics_buffer) return NULL;
-    if (line < 0 || line >= graphics_buffer_height) return NULL;
-    return graphics_buffer + line * graphics_buffer_width;
-}
-
 static struct video_mode_t video_mode = {
     // 640x480 60Hz
     .h_total = 524,
@@ -66,11 +60,6 @@ static struct video_mode_t video_mode = {
 void __not_in_flash_func(vsync_handler)() {
     // Called from DMA IRQ at frame boundary.
     graphics_frame_count++;
-    uint8_t *pending = (uint8_t *)graphics_pending_buffer;
-    if (pending) {
-        graphics_buffer = pending;
-        graphics_pending_buffer = NULL;
-    }
 }
 
 // --- New HDMI Driver Code ---
@@ -318,6 +307,8 @@ static inline void* __not_in_flash_func(nf_memset)(void* ptr, int value, size_t 
     return ptr;
 }
 
+extern uint8_t* graphics_get_buffer_line(int y);
+
 static void __not_in_flash_func(dma_handler_HDMI)() {
     static uint32_t inx_buf_dma;
     static uint line = 0;
@@ -343,7 +334,7 @@ static void __not_in_flash_func(dma_handler_HDMI)() {
         int y = line >> 1;
         
         // Read from framebuffer and copy to output
-        uint8_t* input_buffer = get_line_buffer(y);
+        uint8_t* input_buffer = graphics_get_buffer_line(y);
         if (input_buffer) {
             // Copy from framebuffer, substituting HDMI reserved colors
             for (int i = 0; i < SCREEN_WIDTH; i++) {
