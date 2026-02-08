@@ -25,8 +25,11 @@
 //=============================================================================
 // Configuration
 //=============================================================================
-
-#define MAX_DISK_IMAGES     20
+#if PICO_RP2350
+#define MAX_DISK_IMAGES     100
+#else
+#define MAX_DISK_IMAGES     80
+#endif
 #define MAX_FILENAME_LEN    64
 #define DEFAULT_SCAN_PATH   "/c64"
 
