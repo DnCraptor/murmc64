@@ -73,6 +73,9 @@ static const uint32_t colodore_palette[16] = {
 /*
  *  Constructor
  */
+extern "C" uint32_t __led_state;
+uint32_t __led_state = 0;
+static uint8_t* led_state = (uint8_t*)&__led_state; // Drive LED states
 // Allocate VIC pixel buffer in SRAM (384 x 272 = 104448 bytes)
 uint8_t g_pixels[DISPLAY_X * DISPLAY_Y];
 // Source: VIC buffer (384x272, 8-bit indexed color)

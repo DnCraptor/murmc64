@@ -174,6 +174,7 @@ static void __no_inline_not_in_flash_func(init_clocks)(void) {
     // Overclock BEFORE stdio_init_all() - matching murmgenesis approach
     // Disable voltage limit for high voltages (>1.50V)
     vreg_disable_voltage_limit();
+    sleep_ms(10);
 #if CPU_CLOCK_MHZ > 252
 #if PICO_RP2350
     vreg_set_voltage(CPU_VOLTAGE);
@@ -184,12 +185,9 @@ static void __no_inline_not_in_flash_func(init_clocks)(void) {
                 VREG_AND_CHIP_RESET_VREG_VSEL_BITS);
 #endif
 #endif
-    sleep_ms(100);  // Let voltage stabilize (longer delay for high voltage)
+    sleep_ms(33);  // Let voltage stabilize (longer delay for high voltage)
     // Set system clock
-    if (!set_sys_clock_khz(CPU_CLOCK_MHZ * 1000, false)) {
-        // Fallback to safe speed if requested speed fails
-        set_sys_clock_khz(252 * 1000, true);
-    }
+    set_sys_clock_khz(CPU_CLOCK_MHZ * 1000, true);
 }
 
 static void __no_inline_not_in_flash_func(init_stdio)(void) {

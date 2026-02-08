@@ -70,6 +70,7 @@ void __scratch_x() vsync_handler() {
 }
 
 extern uint8_t* graphics_get_buffer_line(int y);
+extern uint32_t __led_state;
 
 void __time_critical_func() dma_handler_VGA() {
     dma_hw->ints0 = 1u << dma_chan_ctrl;
@@ -136,9 +137,17 @@ void __time_critical_func() dma_handler_VGA() {
 
     // 8-bit buf
     register uint8_t* input_buffer = graphics_get_buffer_line(y);
-    for (register int x = SCREEN_WIDTH; x--;) {
-        *output_buffer_16bit++ = current_palette[*input_buffer];
-        input_buffer++;
+    if (y >= 5 && y < 10 && __led_state) {
+        uint16_t v = current_palette[5];
+        for (register int x = SCREEN_WIDTH; x--;) {
+            *output_buffer_16bit++ = (x >= 5 && x < 10) ? v : current_palette[*input_buffer];
+            input_buffer++;
+        }
+    } else {
+        for (register int x = SCREEN_WIDTH; x--;) {
+            *output_buffer_16bit++ = current_palette[*input_buffer];
+            input_buffer++;
+        }
     }
     dma_channel_set_read_addr(dma_chan_ctrl, output_buffer, false);
 }

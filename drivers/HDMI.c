@@ -308,6 +308,7 @@ static inline void* __not_in_flash_func(nf_memset)(void* ptr, int value, size_t 
 }
 
 extern uint8_t* graphics_get_buffer_line(int y);
+extern uint32_t __led_state;
 
 static void __not_in_flash_func(dma_handler_HDMI)() {
     static uint32_t inx_buf_dma;
@@ -327,20 +328,32 @@ static void __not_in_flash_func(dma_handler_HDMI)() {
     if ((line & 1) == 0) return;
     inx_buf_dma++;
 
-    uint8_t* activ_buf = (uint8_t *)dma_lines[inx_buf_dma & 1];
+    register uint8_t* activ_buf = (uint8_t *)dma_lines[inx_buf_dma & 1];
 
     if (line < video_mode.h_width ) {
-        uint8_t* output_buffer = activ_buf + 72; //для выравнивания синхры;
-        int y = line >> 1;
+        register uint8_t* output_buffer = activ_buf + 72; //для выравнивания синхры;
+        register int y = line >> 1;
         
         // Read from framebuffer and copy to output
-        uint8_t* input_buffer = graphics_get_buffer_line(y);
+        register uint8_t* input_buffer = graphics_get_buffer_line(y);
         if (input_buffer) {
             // Copy from framebuffer, substituting HDMI reserved colors
-            for (int i = 0; i < SCREEN_WIDTH; i++) {
-                uint8_t c = input_buffer[i];
-                if (c >= 240 && c <= 243) c = color_substitute[c - 240];
-                output_buffer[i] = c;
+            if (y >= 5 && y < 10 && __led_state) {
+                for (register int i = 0; i < SCREEN_WIDTH; i++) {
+                    if ((i >= 5 && i < 10)) {
+                        output_buffer[i] = 5;
+                        continue;
+                    }
+                    register uint8_t c = input_buffer[i];
+                    if (c >= 240 && c <= 243) c = color_substitute[c - 240];
+                    output_buffer[i] = c;
+                }
+            } else {
+                for (register int i = 0; i < SCREEN_WIDTH; i++) {
+                    register uint8_t c = input_buffer[i];
+                    if (c >= 240 && c <= 243) c = color_substitute[c - 240];
+                    output_buffer[i] = c;
+                }
             }
         } else {
             // No buffer - fill with background color
