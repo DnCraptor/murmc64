@@ -79,17 +79,12 @@ static const uint32_t colodore_palette[16] = {
 /*
  *  Constructor
  */
-
+// Allocate VIC pixel buffer in SRAM (384 x 272 = 104448 bytes)
+static uint8_t g_pixels[DISPLAY_X * DISPLAY_Y];
 Display::Display(C64 * c64)
     : the_c64(c64), next_note(0), num_locked(false)
 {
-    // Allocate VIC pixel buffer in SRAM (384 x 272 = 104448 bytes)
-    vic_pixels = (uint8_t*)malloc(DISPLAY_X * DISPLAY_Y);
-    if (!vic_pixels) {
-        MII_DEBUG_PRINTF("ERROR: Failed to allocate VIC pixel buffer\n");
-        // Fall back to a smaller buffer if PSRAM fails
-        vic_pixels = new uint8_t[DISPLAY_X * DISPLAY_Y];
-    }
+    vic_pixels = g_pixels;
     memset(vic_pixels, 0, DISPLAY_X * DISPLAY_Y);
 
     // Initialize LED states
@@ -118,10 +113,6 @@ Display::Display(C64 * c64)
 
 Display::~Display()
 {
-    if (vic_pixels) {
-        free(vic_pixels);
-        vic_pixels = nullptr;
-    }
 }
 
 
@@ -208,7 +199,7 @@ int Display::BitmapXMod()
 
 void Display::scale_to_hdmi()
 {
-    if (!vic_pixels || !current_framebuffer) {
+    if (!current_framebuffer) {
         return;
     }
 

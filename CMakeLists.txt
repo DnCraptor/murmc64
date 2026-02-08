@@ -18,7 +18,7 @@ cmake_minimum_required(VERSION 3.13)
 set(BUILD_NAME "murmc64")
 
 # Firmware version string (set by release.sh or manually)
-set(FIRMWARE_VERSION "v1.04" CACHE STRING "Firmware version string")
+set(FIRMWARE_VERSION "v1.05" CACHE STRING "Firmware version string")
 
 # Set board to Pico 2 (RP2350)
 set(PICO_BOARD pico2 CACHE STRING "Pico board type")
