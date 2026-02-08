@@ -25,24 +25,10 @@ int graphics_buffer_shift_x = 0;
 int graphics_buffer_shift_y = 0;
 enum graphics_mode_t hdmi_graphics_mode = 1;  // Use default/simple case
 
-static uint8_t *graphics_buffer = NULL;
-static volatile uint8_t *graphics_pending_buffer = NULL;
 static volatile uint32_t graphics_frame_count = 0;
-
-void graphics_set_buffer(uint8_t *buffer) {
-    graphics_buffer = buffer;
-}
-
-void graphics_request_buffer_swap(uint8_t *buffer) {
-    graphics_pending_buffer = buffer;
-}
 
 uint32_t __not_in_flash() get_frame_count(void) {
     return graphics_frame_count;
-}
-
-uint8_t* graphics_get_buffer(void) {
-    return graphics_buffer;
 }
 
 uint32_t graphics_get_width(void) {

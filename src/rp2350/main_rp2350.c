@@ -81,23 +81,12 @@ void disk_loader_scan(void);
 }
 #endif
 
-// Global framebuffer pointers (used by Display_rp2350.cpp)
-uint8_t *current_framebuffer = NULL;
-volatile int current_fb_index = 0;
-uint8_t *framebuffers[2] = { NULL, NULL };
-
 //=============================================================================
 // Global State
 //=============================================================================
 
 static volatile bool g_emulator_ready = false;
 static volatile bool g_quit_requested = false;
-
-// Double-buffered framebuffers (in SRAM for fast DMA access)
-static uint8_t __attribute__((aligned(4))) g_framebuffer_a[FB_WIDTH * FB_HEIGHT];
-static uint8_t __attribute__((aligned(4))) g_framebuffer_b[FB_WIDTH * FB_HEIGHT];
-static uint8_t *g_front_buffer = g_framebuffer_a;
-static uint8_t *g_back_buffer = g_framebuffer_b;
 
 //=============================================================================
 // Core 1: Video Rendering Task
@@ -283,14 +272,6 @@ static void init_graphics(void) {
     MII_DEBUG_PRINTF("  Setting resolution %dx%d...\n", FB_WIDTH, FB_HEIGHT);
     graphics_set_res(FB_WIDTH, FB_HEIGHT);
 
-    // Set initial framebuffer
-    MII_DEBUG_PRINTF("  Setting initial framebuffer at %p...\n", (void*)g_front_buffer);
-    graphics_set_buffer(g_front_buffer);
-
-    // Clear framebuffers to black
-    memset(g_framebuffer_a, 0, sizeof(g_framebuffer_a));
-    memset(g_framebuffer_b, 0, sizeof(g_framebuffer_b));
-
     MII_DEBUG_PRINTF("Graphics initialized: %dx%d\n", FB_WIDTH, FB_HEIGHT);
 }
 
@@ -467,16 +448,13 @@ static void check_stack(const char *location) {
 //=============================================================================
 // Main Emulator Loop
 //=============================================================================
+bool disk_ui_is_visible(void);
+void disk_ui_render();
+void input_rp2350_poll_no_c64_acts();
 
 static void emulator_main_loop(void) {
     MII_DEBUG_PRINTF("Starting C64 emulator...\n");
     check_stack("emulator_main_loop start");
-
-    // Set up framebuffer globals for Display_rp2350.cpp
-    framebuffers[0] = g_framebuffer_a;
-    framebuffers[1] = g_framebuffer_b;
-    current_framebuffer = g_back_buffer;
-    current_fb_index = 1;
 
     // Initialize C64 emulator
     MII_DEBUG_PRINTF("Calling c64_init()...\n");
@@ -501,27 +479,18 @@ static void emulator_main_loop(void) {
     // watchdog_enable(2000, true);
 
     while (!g_quit_requested) {
-        // Feed watchdog at start of each frame
-        // watchdog_update();
+        if (!disk_ui_is_visible()) {
+            // Run one frame of C64 emulation
+            if (first_frame) MII_DEBUG_PRINTF("Running first frame...\n");
+            c64_run_frame();
+            if (first_frame) { MII_DEBUG_PRINTF("First frame done\n"); first_frame = false; }
 
-        // Run one frame of C64 emulation
-        if (first_frame) MII_DEBUG_PRINTF("Running first frame...\n");
-        c64_run_frame();
-        if (first_frame) { MII_DEBUG_PRINTF("First frame done\n"); first_frame = false; }
-
-        // Swap framebuffers
-        uint8_t *temp = g_front_buffer;
-        g_front_buffer = g_back_buffer;
-        g_back_buffer = temp;
-        current_fb_index = (current_fb_index + 1) % 2;
-        current_framebuffer = g_back_buffer;
-
-        // Request buffer swap at next vsync (thread-safe)
-        graphics_request_buffer_swap(g_front_buffer);
-
-        // Update audio (SID -> I2S)
-        sid_i2s_update();
-
+            // Update audio (SID -> I2S)
+            sid_i2s_update();
+        } else {
+            input_rp2350_poll_no_c64_acts();
+            disk_ui_render();
+        }
         frame_count++;
         total_frames++;
 
@@ -598,10 +567,6 @@ int main(void) {
     multicore_launch_core1(core1_video_task);
     sleep_ms(100);  // Let Core 1 initialize HDMI IRQ
 #endif
-
-    // Initialize framebuffer pointers for double buffering (needed by startscreen)
-    framebuffers[0] = g_framebuffer_a;
-    framebuffers[1] = g_framebuffer_b;
 
     // Show start screen with system information
     {
