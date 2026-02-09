@@ -338,10 +338,13 @@ static void __not_in_flash_func(dma_handler_HDMI)() {
         register uint8_t* input_buffer = graphics_get_buffer_line(y);
         if (input_buffer) {
             // Copy from framebuffer, substituting HDMI reserved colors
-            if (y >= 5 && y < 10 && __led_state) {
+            if (y >= 5 && y < 10 && (__led_state & 0xFF)) { 
+                // drive 0 in error -> red
+                 // TODO: blinking by graphics_frame_count &
+                uint8_t v0 = (__led_state & 0x04) ? 2 /*RED*/ : 5 /*GREEN*/;
                 for (register int i = 0; i < SCREEN_WIDTH; i++) {
                     if ((i >= 5 && i < 10)) {
-                        output_buffer[i] = 5;
+                        output_buffer[i] = v0;
                         continue;
                     }
                     register uint8_t c = input_buffer[i];

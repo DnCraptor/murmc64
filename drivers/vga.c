@@ -137,8 +137,9 @@ void __time_critical_func() dma_handler_VGA() {
 
     // 8-bit buf
     register uint8_t* input_buffer = graphics_get_buffer_line(y);
-    if (y >= 5 && y < 10 && __led_state) {
-        uint16_t v = current_palette[5];
+    if (y >= 5 && y < 10 && (__led_state & 0xFF)) {
+        // drive0 in error -> red
+        uint16_t v = current_palette[(__led_state & 0x04) ? 2 /*RED*/ : 5 /*GREEN*/]; // TODO: blinking
         for (register int x = SCREEN_WIDTH; x--;) {
             *output_buffer_16bit++ = (x >= 5 && x < 10) ? v : current_palette[*input_buffer];
             input_buffer++;
