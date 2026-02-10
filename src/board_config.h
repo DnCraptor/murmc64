@@ -274,22 +274,30 @@ static inline uint get_psram_pin(void) {
 #define C64_DISPLAY_WIDTH   384
 #define C64_DISPLAY_HEIGHT  272
 
+#ifdef HDMI_60HZ
 // HDMI output resolution (we scale C64 to fit 320x240)
 // The C64 display will be centered with slight cropping
 #define HDMI_WIDTH  640
 #define HDMI_HEIGHT 480
+#else
+#define HDMI_WIDTH  720
+#define HDMI_HEIGHT 576
+#endif
 
 // Framebuffer configuration
-// We use 320x240 output, scaling C64's 384x272 with some border cropping
-// Visible area: ~320 pixels wide (from 384), ~240 lines (from 272)
-#define FB_WIDTH   320
-#define FB_HEIGHT  240
+#define FB_WIDTH   (HDMI_WIDTH / 2)
+#define FB_HEIGHT  (HDMI_HEIGHT / 2)
 
+#ifdef HDMI_60HZ
 // Border cropping offsets (to center the visible C64 screen)
 // Left border: (384-320)/2 = 32 pixels
 // Top border: (272-240)/2 = 16 lines
-#define C64_CROP_LEFT   32
 #define C64_CROP_TOP    16
+#define C64_CROP_LEFT   32
+#else
+#define C64_CROP_TOP    0
+#define C64_CROP_LEFT   12
+#endif
 
 //=============================================================================
 // C64 Memory Configuration

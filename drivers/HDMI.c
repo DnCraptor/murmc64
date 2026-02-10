@@ -13,14 +13,31 @@
 #include "hardware/irq.h"
 #include "pico/platform.h"
 
+#if HDMI_60HZ
+# define SCREEN_WIDTH  (320)
+# define SCREEN_HEIGHT (240)
+# define HDMI_SYNC_L1    490
+# define HDMI_SYNC_L2    491
+# define HDMI_SYNC_PRE   48
+# define HDMI_ACTIVE_OFF 72
+#else
+# define SCREEN_WIDTH  (360)
+# define SCREEN_HEIGHT (288)
+# define HDMI_SYNC_L1    580
+# define HDMI_SYNC_L2    585
+# define HDMI_SYNC_PRE   52
+# define HDMI_ACTIVE_OFF 78
+#endif
+#define HDMI_SYNC_POST  (HDMI_ACTIVE_OFF + SCREEN_WIDTH)
+
 // Flag to defer IRQ handler setup to Core 1
 // When true, hdmi_init() will NOT set the IRQ handler - Core 1 must call
 // graphics_init_irq_on_this_core() after starting.
 static bool g_defer_irq_to_core1 = false;
 
 // Globals expected by the driver
-int graphics_buffer_width = 320;
-int graphics_buffer_height = 240;
+int graphics_buffer_width = SCREEN_WIDTH;
+int graphics_buffer_height = SCREEN_HEIGHT;
 int graphics_buffer_shift_x = 0;
 int graphics_buffer_shift_y = 0;
 enum graphics_mode_t hdmi_graphics_mode = 1;  // Use default/simple case
@@ -49,6 +66,7 @@ void graphics_set_shift(int x, int y) {
     graphics_buffer_shift_y = y;
 }
 
+#if HDMI_60HZ
 static struct video_mode_t video_mode = {
     // 640x480 60Hz
     .h_total = 524,
@@ -56,6 +74,15 @@ static struct video_mode_t video_mode = {
     .freq = 60,
     .vgaPxClk = 25175000
 };
+#else
+static struct video_mode_t video_mode = {
+    // 640x480 60Hz
+    .h_total = 625,
+    .h_width = 576,
+    .freq = 50,
+    .vgaPxClk = 27000000
+};
+#endif
 
 void __not_in_flash_func(vsync_handler)() {
     // Called from DMA IRQ at frame boundary.
@@ -78,10 +105,6 @@ static uint32_t palette[256];
 // Color substitution map for HDMI reserved indices 240-243
 static uint8_t color_substitute[4] = {239, 239, 239, 239};
 
-
-#define SCREEN_WIDTH (320)
-#define SCREEN_HEIGHT (240)
-
 // #define HDMI_WIDTH 480 //480 Default
 // #define HDMI_HEIGHT 644 //524 Default
 // #define HDMI_HZ 52 //60 Default
@@ -101,7 +124,12 @@ static uint32_t* DMA_BUF_ADDR[2];
 
 //ДМА палитра для конвертации
 //в хвосте этой памяти выделяется dma_data
-alignas(4096) uint32_t conv_color[1224];
+#ifdef HDMI_60HZ
+# define DMA_LINE_WORDS (400 / 4)
+#else
+# define DMA_LINE_WORDS (432 / 4)
+#endif
+alignas(4096) uint32_t conv_color[1024 + 2 * DMA_LINE_WORDS];
 
 //индекс, проверяющий зависание
 static uint32_t irq_inx = 0;
@@ -331,9 +359,18 @@ static void __not_in_flash_func(dma_handler_HDMI)() {
     register uint8_t* activ_buf = (uint8_t *)dma_lines[inx_buf_dma & 1];
 
     if (line < video_mode.h_width ) {
-        register uint8_t* output_buffer = activ_buf + 72; //для выравнивания синхры;
+        register uint8_t* output_buffer = activ_buf + HDMI_ACTIVE_OFF; //для выравнивания синхры;
         register int y = line >> 1;
-        
+
+#ifndef HDMI_60HZ
+        if (y < 8) {
+            y = 0;
+        } else if (y >= 280) {
+            y = 271;
+        } else {
+            y = y - 8;   // 8..279 → 0..271
+        }
+#endif
         // Read from framebuffer and copy to output
         register uint8_t* input_buffer = graphics_get_buffer_line(y);
         if (input_buffer) {
@@ -365,52 +402,28 @@ static void __not_in_flash_func(dma_handler_HDMI)() {
         
         //ССИ
         //для выравнивания синхры
-
         // --|_|---|_|---|_|----
         //---|___________|-----
-        nf_memset(activ_buf + 48,BASE_HDMI_CTRL_INX, 24);
-        nf_memset(activ_buf,BASE_HDMI_CTRL_INX + 1, 48);
-        nf_memset(activ_buf + 392,BASE_HDMI_CTRL_INX, 8);
-
-        //без выравнивания
-        // --|_|---|_|---|_|----
-        //------|___________|----
-        //   memset(activ_buf+320,BASE_HDMI_CTRL_INX,8);
-        //   memset(activ_buf+328,BASE_HDMI_CTRL_INX+1,48);
-        //   memset(activ_buf+376,BASE_HDMI_CTRL_INX,24);
+        nf_memset(activ_buf + HDMI_SYNC_PRE, BASE_HDMI_CTRL_INX, 24);
+        nf_memset(activ_buf, BASE_HDMI_CTRL_INX + 1, HDMI_SYNC_PRE);
+        nf_memset(activ_buf + HDMI_SYNC_POST, BASE_HDMI_CTRL_INX, 8);
     }
     else {
-        if ((line >= 490) && (line < 492)) {
+        if ((line >= HDMI_SYNC_L1) && (line <= HDMI_SYNC_L2)) {
             //кадровый синхроимпульс
             //для выравнивания синхры
             // --|_|---|_|---|_|----
             //---|___________|-----
-            nf_memset(activ_buf + 48,BASE_HDMI_CTRL_INX + 2, 352);
-            nf_memset(activ_buf,BASE_HDMI_CTRL_INX + 3, 48);
-            //без выравнивания
-            // --|_|---|_|---|_|----
-            //-------|___________|----
-
-            // memset(activ_buf,BASE_HDMI_CTRL_INX+2,328);
-            // memset(activ_buf+328,BASE_HDMI_CTRL_INX+3,48);
-            // memset(activ_buf+376,BASE_HDMI_CTRL_INX+2,24);
+            nf_memset(activ_buf + HDMI_SYNC_PRE, BASE_HDMI_CTRL_INX + 2, 352);
+            nf_memset(activ_buf, BASE_HDMI_CTRL_INX + 3, HDMI_SYNC_PRE);
         }
         else {
             //ССИ без изображения
             //для выравнивания синхры
-
-            nf_memset(activ_buf + 48,BASE_HDMI_CTRL_INX, 352);
-            nf_memset(activ_buf,BASE_HDMI_CTRL_INX + 1, 48);
-
-            // memset(activ_buf,BASE_HDMI_CTRL_INX,328);
-            // memset(activ_buf+328,BASE_HDMI_CTRL_INX+1,48);
-            // memset(activ_buf+376,BASE_HDMI_CTRL_INX,24);
+            nf_memset(activ_buf + HDMI_SYNC_PRE, BASE_HDMI_CTRL_INX, 352);
+            nf_memset(activ_buf, BASE_HDMI_CTRL_INX + 1, HDMI_SYNC_PRE);
         };
     }
-
-
-    // y=(y==524)?0:(y+1);
-    // inx_buf_dma++;
 }
 
 
@@ -550,14 +563,17 @@ static inline bool hdmi_init() {
     sm_config_set_out_shift(&c_c, true, true, 30);
     sm_config_set_fifo_join(&c_c, PIO_FIFO_JOIN_TX);
 
-    int hdmi_hz = video_mode.freq;
-    sm_config_set_clkdiv(&c_c, (clock_get_hz(clk_sys) / 252000000.0f) * (60 / hdmi_hz));
+#if HDMI_60HZ
+    sm_config_set_clkdiv(&c_c, (clock_get_hz(clk_sys) / 252000000.0f));
+#else 
+    sm_config_set_clkdiv(&c_c, (clock_get_hz(clk_sys) / 270000000.0f));
+#endif
     pio_sm_init(PIO_VIDEO, SM_video, offs_prg0, &c_c);
     pio_sm_set_enabled(PIO_VIDEO, SM_video, true);
 
     //настройки DMA
     dma_lines[0] = &conv_color[1024];
-    dma_lines[1] = &conv_color[1124];
+    dma_lines[1] = &conv_color[1024 + DMA_LINE_WORDS];
 
     //основной рабочий канал
     dma_channel_config cfg_dma = dma_channel_get_default_config(dma_chan);
@@ -579,7 +595,11 @@ static inline bool hdmi_init() {
         &cfg_dma,
         &PIO_VIDEO_ADDR->txf[SM_conv], // Write address
         &dma_lines[0][0], // read address
-        400, //
+#if HDMI_60HZ
+        400, // encoded_transfer_count (not bytes)
+#else
+        432, // encoded_transfer_count (not bytes)
+#endif
         false // Don't start yet
     );
 

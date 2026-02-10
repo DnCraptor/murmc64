@@ -21,13 +21,13 @@ set(BUILD_NAME "murmc64")
 set(FIRMWARE_VERSION "v1.05" CACHE STRING "Firmware version string")
 
 # Set board to Pico 2 (RP2350)
-set(PICO_BOARD pico CACHE STRING "Board type")
+set(PICO_BOARD pico2 CACHE STRING "Board type")
 
 # Board configuration variant (M1, M2, PC or Z0)
 set(BOARD_VARIANT "M1" CACHE STRING "Board variant: M1, M2 or PC")
 
 # Video output type (VGA or HDMI)
-set(VIDEO_TYPE "VGA" CACHE STRING "Video output: VGA or HDMI")
+set(VIDEO_TYPE "HDMI" CACHE STRING "Video output: VGA or HDMI")
 
 # Audio output configuration (I2S or PWM)
 set(AUDIO_TYPE "PWM" CACHE STRING "Audio output: I2S or PWM")
@@ -36,6 +36,7 @@ set(AUDIO_TYPE "PWM" CACHE STRING "Audio output: I2S or PWM")
 option(MOS2 "MOS2 support" OFF)
 
 # CPU overclock configuration (252, 378, 428(VGA), 504 MHz)
+# 270, 405 - for HDMI 50 Гц
 set(CPU_SPEED "378" CACHE STRING "CPU speed: 252, 378, 428 (VGA only), 504 MHz")
 
 # PSRAM speed configuration (84, 100, 133, 166 MHz target)
@@ -331,9 +332,11 @@ elseif(AUDIO_TYPE STREQUAL "PWM")
 endif()
 
 if (VIDEO_HDMI)
+    target_compile_definitions(drivers PRIVATE HDMI_60HZ=1)
     target_compile_definitions(${BUILD_NAME} PRIVATE
         VIDEO_HDMI
         VIDEO=HDMI
+        HDMI_60HZ=1
     )
 endif()
 if (VIDEO_VGA)
